@@ -69,7 +69,7 @@ Topic: "${projectTitle}". ${userPrompt || ""}`;
 
     await supabase.storage.from("segment-images").upload(fileName, imageBytes, { upsert: true, contentType: mimeType });
     const { data: urlData } = supabase.storage.from("segment-images").getPublicUrl(fileName);
-    const thumbnailUrl = urlData.publicUrl;
+    const thumbnailUrl = urlData.publicUrl + `?t=${Date.now()}`;
 
     await supabase.from("projects").update({ thumbnail_url: thumbnailUrl, updated_at: new Date().toISOString() }).eq("id", projectId);
 
