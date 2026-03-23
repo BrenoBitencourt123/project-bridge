@@ -1,0 +1,313 @@
+import { useState, useRef } from 'react';
+import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { supabase } from '@/integrations/supabase/client';
+import { Project, Segment } from '@/types/atlas';
+import { SegmentCard } from './SegmentCard';
+import { useToast } from '@/hooks/use-toast';
+import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
+import { findSegmentCutPoints } from '@/lib/find-cut-points';
+import type { Alignment } from '@/types/atlas';
+
+interface MediaStepProps {
+  project: Project;
+  segments: Segment[];
+  onSegmentsChange: (segments: Segment[]) => void;
+  onUpdate: (updates: Partial<Project>) => void;
+  onNext: () => void;
+}
+
+export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext }: MediaStepProps) {
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [generatingImages, setGeneratingImages] = useState(false);
+  const [generatingAudios, setGeneratingAudios] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [imageProgress, setImageProgress] = useState(0);
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [statusText, setStatusText] = useState('');
+  const [genImageId, setGenImageId] = useState<string | null>(null);
+  const [genAudioId, setGenAudioId] = useState<string | null>(null);
+
+  const imagesDone = segments.filter(s => s.image_status === 'done').length;
+  const audiosDone = segments.filter(s => s.audio_status === 'done').length;
+  const allDone = imagesDone === segments.length && audiosDone === segments.length;
+
+  const updateSegment = (index: number, updates: Partial<Segment>) => {
+    const updated = [...segments];
+    updated[index] = { ...updated[index], ...updates };
+    onSegmentsChange(updated);
+  };
+
+  const handleRegeneratePrompts = async () => {
+    setRegenerating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('regenerate-prompts', {
+        body: { segments: segments.map(s => ({ narration: s.narration, momentType: s.moment_type })) },
+      });
+      if (error) throw error;
+      const updated = segments.map((s, i) => ({
+        ...s,
+        image_prompt: data.prompts[i]?.imagePrompt || s.image_prompt,
+        symbolism: data.prompts[i]?.symbolism || s.symbolism,
+      }));
+      onSegmentsChange(updated);
+      // Save to DB
+      for (const seg of updated) {
+        await supabase.from('segments').update({ image_prompt: seg.image_prompt, symbolism: seg.symbolism }).eq('id', seg.id);
+      }
+      toast({ title: 'Prompts regenerados!' });
+    } catch (err: any) {
+      toast({ title: 'Erro', description: err.message, variant: 'destructive' });
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const handleGenerateAllImages = async () => {
+    setGeneratingImages(true);
+    setImageProgress(0);
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      if (seg.image_status === 'done') { setImageProgress(((i + 1) / segments.length) * 100); continue; }
+      updateSegment(i, { image_status: 'generating' });
+      try {
+        const { data, error } = await supabase.functions.invoke('generate-image', {
+          body: { imagePrompt: seg.image_prompt, projectId: project.id, segmentId: seg.id, sequenceNumber: seg.sequence_number, momentType: seg.moment_type },
+        });
+        if (error) throw error;
+        updateSegment(i, { image_url: data.imageUrl, image_status: 'done' });
+        await supabase.from('segments').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', seg.id);
+      } catch {
+        updateSegment(i, { image_status: 'error' });
+        await supabase.from('segments').update({ image_status: 'error' }).eq('id', seg.id);
+      }
+      setImageProgress(((i + 1) / segments.length) * 100);
+    }
+    await supabase.from('projects').update({ status: 'images_done', updated_at: new Date().toISOString() }).eq('id', project.id);
+    onUpdate({ status: 'images_done' });
+    setGeneratingImages(false);
+  };
+
+  const handleGenerateAllAudios = async () => {
+    setGeneratingAudios(true);
+    setAudioProgress(0);
+    setStatusText('Gerando áudio completo...');
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-audio-batch', {
+        body: { rawScript: project.raw_script, projectId: project.id },
+      });
+      if (error) throw error;
+
+      setStatusText('Processando alinhamento...');
+      const alignment: Alignment = data.isChunked
+        ? mergeAlignments(data.chunks.map((c: any) => c.alignment))
+        : data.alignment;
+
+      const cutTimes = findSegmentCutPoints(project.raw_script!, alignment, segments);
+
+      setStatusText('Fatiando áudio...');
+      let blobs: Blob[];
+      if (data.isChunked) {
+        blobs = await splitChunkedAudioAtCutPoints(data.chunks.map((c: any) => c.audioBase64), cutTimes);
+      } else {
+        const audioBytes = Uint8Array.from(atob(data.fullAudioBase64), c => c.charCodeAt(0));
+        blobs = await splitAudioAtCutPoints(audioBytes.buffer, cutTimes);
+      }
+
+      setStatusText('Enviando segmentos...');
+      for (let i = 0; i < blobs.length && i < segments.length; i++) {
+        const seg = segments[i];
+        const fileName = `${project.id}/segment-${String(seg.sequence_number).padStart(3, '0')}.wav`;
+        const { error: uploadErr } = await supabase.storage.from('segment-audio').upload(fileName, blobs[i], { upsert: true, contentType: 'audio/wav' });
+        if (uploadErr) { console.error(uploadErr); continue; }
+        const { data: urlData } = supabase.storage.from('segment-audio').getPublicUrl(fileName);
+        updateSegment(i, { audio_url: urlData.publicUrl, audio_status: 'done' });
+        await supabase.from('segments').update({ audio_url: urlData.publicUrl, audio_status: 'done' }).eq('id', seg.id);
+        setAudioProgress(((i + 1) / segments.length) * 100);
+      }
+
+      await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
+      onUpdate({ status: 'audio_done' });
+      toast({ title: 'Áudios gerados!' });
+    } catch (err: any) {
+      toast({ title: 'Erro ao gerar áudios', description: err.message, variant: 'destructive' });
+    } finally {
+      setGeneratingAudios(false);
+      setStatusText('');
+    }
+  };
+
+  const handleUploadAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploadingAudio(true);
+    setStatusText('Transcrevendo áudio...');
+    try {
+      const alignments: Alignment[] = [];
+      const audioBuffers: ArrayBuffer[] = [];
+
+      for (let i = 0; i < files.length; i++) {
+        setStatusText(`Transcrevendo parte ${i + 1} de ${files.length}...`);
+        const formData = new FormData();
+        formData.append('audio', files[i]);
+        const { data, error } = await supabase.functions.invoke('transcribe-audio', { body: formData });
+        if (error) throw error;
+        alignments.push(data.alignment);
+        audioBuffers.push(await files[i].arrayBuffer());
+      }
+
+      setStatusText('Processando alinhamento...');
+      const mergedAlignment = mergeAlignments(alignments);
+      const cutTimes = findSegmentCutPoints(project.raw_script!, mergedAlignment, segments);
+
+      setStatusText('Fatiando áudio...');
+      // Merge audio buffers into one then split
+      const totalLength = audioBuffers.reduce((sum, b) => sum + b.byteLength, 0);
+      const merged = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const buf of audioBuffers) {
+        merged.set(new Uint8Array(buf), offset);
+        offset += buf.byteLength;
+      }
+      const blobs = await splitAudioAtCutPoints(merged.buffer, cutTimes);
+
+      setStatusText('Enviando segmentos...');
+      for (let i = 0; i < blobs.length && i < segments.length; i++) {
+        const seg = segments[i];
+        const fileName = `${project.id}/segment-${String(seg.sequence_number).padStart(3, '0')}.wav`;
+        await supabase.storage.from('segment-audio').upload(fileName, blobs[i], { upsert: true, contentType: 'audio/wav' });
+        const { data: urlData } = supabase.storage.from('segment-audio').getPublicUrl(fileName);
+        updateSegment(i, { audio_url: urlData.publicUrl, audio_status: 'done' });
+        await supabase.from('segments').update({ audio_url: urlData.publicUrl, audio_status: 'done' }).eq('id', seg.id);
+        setAudioProgress(((i + 1) / segments.length) * 100);
+      }
+
+      await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
+      onUpdate({ status: 'audio_done' });
+      toast({ title: 'Áudios importados!' });
+    } catch (err: any) {
+      toast({ title: 'Erro ao importar áudio', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingAudio(false);
+      setStatusText('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleGenerateSingleImage = async (index: number) => {
+    const seg = segments[index];
+    setGenImageId(seg.id);
+    updateSegment(index, { image_status: 'generating' });
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-image', {
+        body: { imagePrompt: seg.image_prompt, projectId: project.id, segmentId: seg.id, sequenceNumber: seg.sequence_number, momentType: seg.moment_type },
+      });
+      if (error) throw error;
+      updateSegment(index, { image_url: data.imageUrl, image_status: 'done' });
+      await supabase.from('segments').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', seg.id);
+    } catch {
+      updateSegment(index, { image_status: 'error' });
+    } finally {
+      setGenImageId(null);
+    }
+  };
+
+  const handleGenerateSingleAudio = async (index: number) => {
+    const seg = segments[index];
+    setGenAudioId(seg.id);
+    updateSegment(index, { audio_status: 'generating' });
+    try {
+      const prev = index > 0 ? segments[index - 1].narration : undefined;
+      const next = index < segments.length - 1 ? segments[index + 1].narration : undefined;
+      const { data, error } = await supabase.functions.invoke('generate-audio', {
+        body: { narration: seg.narration, projectId: project.id, segmentId: seg.id, sequenceNumber: seg.sequence_number, previousText: prev, nextText: next },
+      });
+      if (error) throw error;
+      updateSegment(index, { audio_url: data.audioUrl, audio_status: 'done' });
+      await supabase.from('segments').update({ audio_url: data.audioUrl, audio_status: 'done' }).eq('id', seg.id);
+    } catch {
+      updateSegment(index, { audio_status: 'error' });
+    } finally {
+      setGenAudioId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* HUD */}
+      <div className="sticky top-14 z-40 rounded-lg border bg-card p-4 space-y-3">
+        <h3 className="font-semibold">Geração de Mídia</h3>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={handleRegeneratePrompts} disabled={regenerating}>
+            {regenerating ? <Loader2 className="animate-spin h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
+            Regenerar Prompts
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleGenerateAllImages} disabled={generatingImages}>
+            {generatingImages ? <Loader2 className="animate-spin h-3 w-3" /> : <Image className="h-3 w-3" />}
+            Gerar Todas Imagens
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleGenerateAllAudios} disabled={generatingAudios}>
+            {generatingAudios ? <Loader2 className="animate-spin h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+            Gerar Todos Áudios
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingAudio}>
+            {uploadingAudio ? <Loader2 className="animate-spin h-3 w-3" /> : <Upload className="h-3 w-3" />}
+            Enviar Áudio
+          </Button>
+          <input ref={fileInputRef} type="file" multiple accept=".mp3,.wav,.m4a" className="hidden" onChange={handleUploadAudio} />
+        </div>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <span className="text-muted-foreground">Imagens {imagesDone}/{segments.length}</span>
+            <Progress value={(imagesDone / segments.length) * 100} className="mt-1" />
+          </div>
+          <div>
+            <span className="text-muted-foreground">Áudios {audiosDone}/{segments.length}</span>
+            <Progress value={(audiosDone / segments.length) * 100} className="mt-1" />
+          </div>
+        </div>
+        {statusText && <p className="text-xs text-muted-foreground">{statusText}</p>}
+        {allDone && (
+          <Button className="w-full" onClick={onNext}>
+            Export <ArrowRight className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+
+      {/* Segment list */}
+      <div className="space-y-2">
+        {segments.map((seg, i) => (
+          <SegmentCard
+            key={seg.id}
+            segment={seg}
+            showMedia
+            onUpdate={updates => updateSegment(i, updates)}
+            onGenerateImage={() => handleGenerateSingleImage(i)}
+            onGenerateAudio={() => handleGenerateSingleAudio(i)}
+            generatingImage={genImageId === seg.id}
+            generatingAudio={genAudioId === seg.id}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function mergeAlignments(alignments: Alignment[]): Alignment {
+  const merged: Alignment = { characters: [], character_start_times_seconds: [], character_end_times_seconds: [] };
+  let timeOffset = 0;
+  for (const a of alignments) {
+    for (let i = 0; i < a.characters.length; i++) {
+      merged.characters.push(a.characters[i]);
+      merged.character_start_times_seconds.push(a.character_start_times_seconds[i] + timeOffset);
+      merged.character_end_times_seconds.push(a.character_end_times_seconds[i] + timeOffset);
+    }
+    if (a.character_end_times_seconds.length > 0) {
+      timeOffset = merged.character_end_times_seconds[merged.character_end_times_seconds.length - 1];
+    }
+  }
+  return merged;
+}
