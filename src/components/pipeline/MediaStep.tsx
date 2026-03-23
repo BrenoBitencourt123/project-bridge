@@ -84,6 +84,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
   const handleGenerateAllImages = async () => {
     setGeneratingImages(true);
+    onGeneratingChange?.(true);
     setImageProgress(0);
     let done = 0;
 
