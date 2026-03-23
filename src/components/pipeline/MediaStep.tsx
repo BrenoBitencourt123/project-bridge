@@ -189,23 +189,22 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     }
   };
 
-  const handleUploadAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleUploadAudio = async (orderedFiles: File[]) => {
+    if (orderedFiles.length === 0) return;
     setUploadingAudio(true);
     setStatusText('Transcrevendo áudio...');
     try {
       const alignments: Alignment[] = [];
       const audioBuffers: ArrayBuffer[] = [];
 
-      for (let i = 0; i < files.length; i++) {
-        setStatusText(`Transcrevendo parte ${i + 1} de ${files.length}...`);
+      for (let i = 0; i < orderedFiles.length; i++) {
+        setStatusText(`Transcrevendo parte ${i + 1} de ${orderedFiles.length}...`);
         const formData = new FormData();
-        formData.append('audio', files[i]);
+        formData.append('audio', orderedFiles[i]);
         const { data, error } = await supabase.functions.invoke('transcribe-audio', { body: formData });
         if (error) throw error;
         alignments.push(data.alignment);
-        audioBuffers.push(await files[i].arrayBuffer());
+        audioBuffers.push(await orderedFiles[i].arrayBuffer());
       }
 
       setStatusText('Processando alinhamento...');
@@ -234,7 +233,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     } finally {
       setUploadingAudio(false);
       setStatusText('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
