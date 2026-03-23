@@ -12,9 +12,11 @@ interface ExportStepProps {
 export function ExportStep({ projectTitle, segments }: ExportStepProps) {
   const [downloading, setDownloading] = useState(false);
 
-  const imagesReady = segments.filter(s => s.image_status === 'done').length;
+  const allSubScenes = segments.flatMap(s =>
+    (s.sub_scenes || []).filter(sc => sc.image_status === 'done')
+  );
   const audiosReady = segments.filter(s => s.audio_status === 'done').length;
-  const totalFiles = imagesReady + audiosReady;
+  const totalFiles = allSubScenes.length + audiosReady;
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -22,11 +24,17 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
       const zip = new JSZip();
       for (const seg of segments) {
         const num = String(seg.sequence_number).padStart(3, '0');
-        if (seg.image_url && seg.image_status === 'done') {
-          const res = await fetch(seg.image_url);
-          const blob = await res.blob();
-          zip.file(`segment-${num}.png`, blob);
+
+        // Download sub-scene images
+        for (const sc of (seg.sub_scenes || [])) {
+          if (sc.image_url && sc.image_status === 'done') {
+            const res = await fetch(sc.image_url);
+            const blob = await res.blob();
+            zip.file(`segment-${num}-sub-${sc.sub_index}.png`, blob);
+          }
         }
+
+        // Download audio (1 per block)
         if (seg.audio_url && seg.audio_status === 'done') {
           const res = await fetch(seg.audio_url);
           const blob = await res.blob();
@@ -51,19 +59,29 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
     <div className="space-y-6">
       <div className="text-center space-y-2">
         <p className="text-muted-foreground">
-          {imagesReady}/{segments.length} imagens · {audiosReady}/{segments.length} áudios
+          {allSubScenes.length} imagens · {audiosReady}/{segments.length} áudios
         </p>
       </div>
 
       <div className="space-y-1 max-h-96 overflow-y-auto">
         {segments.map(seg => {
           const num = String(seg.sequence_number).padStart(3, '0');
+          const subScenes = seg.sub_scenes || [];
           return (
-            <div key={seg.id} className="flex items-center gap-3 rounded px-3 py-1.5 text-sm">
-              <span className="font-mono text-xs text-muted-foreground">{num}</span>
-              <Image className={`h-3.5 w-3.5 ${seg.image_status === 'done' ? 'text-success' : 'text-muted-foreground/40'}`} />
-              <Volume2 className={`h-3.5 w-3.5 ${seg.audio_status === 'done' ? 'text-success' : 'text-muted-foreground/40'}`} />
-              <span className="flex-1 truncate">{seg.narration.slice(0, 60)}</span>
+            <div key={seg.id} className="space-y-0.5">
+              <div className="flex items-center gap-3 rounded px-3 py-1.5 text-sm">
+                <span className="font-mono text-xs text-muted-foreground">{num}</span>
+                <Volume2 className={`h-3.5 w-3.5 ${seg.audio_status === 'done' ? 'text-success' : 'text-muted-foreground/40'}`} />
+                <span className="text-xs text-muted-foreground">{subScenes.length} sub-cenas</span>
+                <span className="flex-1 truncate">{seg.narration.slice(0, 60)}</span>
+              </div>
+              {subScenes.map(sc => (
+                <div key={sc.id} className="flex items-center gap-3 rounded px-6 py-0.5 text-xs text-muted-foreground">
+                  <span className="font-mono">sub-{sc.sub_index}</span>
+                  <Image className={`h-3 w-3 ${sc.image_status === 'done' ? 'text-success' : 'text-muted-foreground/40'}`} />
+                  <span className="truncate">{sc.narration_segment.slice(0, 50)}</span>
+                </div>
+              ))}
             </div>
           );
         })}

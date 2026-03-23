@@ -3,7 +3,7 @@ import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2 } from 'lucide-r
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
-import { Project, Segment } from '@/types/atlas';
+import { Project, Segment, SubScene } from '@/types/atlas';
 import { SegmentCard } from './SegmentCard';
 import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
@@ -28,16 +28,33 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [imageProgress, setImageProgress] = useState(0);
   const [audioProgress, setAudioProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
-  const [genImageId, setGenImageId] = useState<string | null>(null);
+  const [genSubSceneId, setGenSubSceneId] = useState<string | null>(null);
   const [genAudioId, setGenAudioId] = useState<string | null>(null);
 
-  const imagesDone = segments.filter(s => s.image_status === 'done').length;
+  // Count sub-scenes for image progress
+  const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
+  const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
+  const totalSubScenes = allSubScenes.length;
+
   const audiosDone = segments.filter(s => s.audio_status === 'done').length;
-  const allDone = imagesDone === segments.length && audiosDone === segments.length;
+  const allDone = subScenesDone === totalSubScenes && audiosDone === segments.length && totalSubScenes > 0;
 
   const updateSegment = (index: number, updates: Partial<Segment>) => {
     const updated = [...segments];
     updated[index] = { ...updated[index], ...updates };
+    onSegmentsChange(updated);
+  };
+
+  const updateSubSceneInSegments = (segmentId: string, subSceneId: string, updates: Partial<SubScene>) => {
+    const updated = segments.map(seg => {
+      if (seg.id !== segmentId) return seg;
+      return {
+        ...seg,
+        sub_scenes: (seg.sub_scenes || []).map(sc =>
+          sc.id === subSceneId ? { ...sc, ...updates } : sc
+        ),
+      };
+    });
     onSegmentsChange(updated);
   };
 
@@ -54,7 +71,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         symbolism: data.prompts[i]?.symbolism || s.symbolism,
       }));
       onSegmentsChange(updated);
-      // Save to DB
       for (const seg of updated) {
         await supabase.from('segments').update({ image_prompt: seg.image_prompt, symbolism: seg.symbolism }).eq('id', seg.id);
       }
@@ -69,23 +85,40 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const handleGenerateAllImages = async () => {
     setGeneratingImages(true);
     setImageProgress(0);
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      if (seg.image_status === 'done') { setImageProgress(((i + 1) / segments.length) * 100); continue; }
-      updateSegment(i, { image_status: 'generating' });
-      try {
-        const { data, error } = await supabase.functions.invoke('generate-image', {
-          body: { imagePrompt: seg.image_prompt, projectId: project.id, segmentId: seg.id, sequenceNumber: seg.sequence_number, momentType: seg.moment_type },
-        });
-        if (error) throw error;
-        updateSegment(i, { image_url: data.imageUrl, image_status: 'done' });
-        await supabase.from('segments').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', seg.id);
-      } catch {
-        updateSegment(i, { image_status: 'error' });
-        await supabase.from('segments').update({ image_status: 'error' }).eq('id', seg.id);
+    let done = 0;
+
+    for (const seg of segments) {
+      const subScenes = seg.sub_scenes || [];
+      for (const sc of subScenes) {
+        if (sc.image_status === 'done') {
+          done++;
+          setImageProgress((done / totalSubScenes) * 100);
+          continue;
+        }
+        updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
+        try {
+          const { data, error } = await supabase.functions.invoke('generate-image', {
+            body: {
+              imagePrompt: sc.image_prompt,
+              projectId: project.id,
+              segmentId: seg.id,
+              sequenceNumber: seg.sequence_number,
+              subIndex: sc.sub_index,
+              momentType: seg.moment_type,
+            },
+          });
+          if (error) throw error;
+          updateSubSceneInSegments(seg.id, sc.id, { image_url: data.imageUrl, image_status: 'done' });
+          await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', sc.id);
+        } catch {
+          updateSubSceneInSegments(seg.id, sc.id, { image_status: 'error' });
+          await supabase.from('sub_scenes').update({ image_status: 'error' }).eq('id', sc.id);
+        }
+        done++;
+        setImageProgress((done / totalSubScenes) * 100);
       }
-      setImageProgress(((i + 1) / segments.length) * 100);
     }
+
     await supabase.from('projects').update({ status: 'images_done', updated_at: new Date().toISOString() }).eq('id', project.id);
     onUpdate({ status: 'images_done' });
     setGeneratingImages(false);
@@ -164,7 +197,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       const cutTimes = findSegmentCutPoints(project.raw_script!, mergedAlignment, segments);
 
       setStatusText('Fatiando áudio...');
-      // Merge audio buffers into one then split
       const totalLength = audioBuffers.reduce((sum, b) => sum + b.byteLength, 0);
       const merged = new Uint8Array(totalLength);
       let offset = 0;
@@ -197,21 +229,33 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     }
   };
 
-  const handleGenerateSingleImage = async (index: number) => {
-    const seg = segments[index];
-    setGenImageId(seg.id);
-    updateSegment(index, { image_status: 'generating' });
+  const handleGenerateSingleImage = async (segIndex: number, subSceneId?: string) => {
+    const seg = segments[segIndex];
+    if (!subSceneId) return;
+
+    const sc = seg.sub_scenes?.find(s => s.id === subSceneId);
+    if (!sc) return;
+
+    setGenSubSceneId(subSceneId);
+    updateSubSceneInSegments(seg.id, subSceneId, { image_status: 'generating' });
     try {
       const { data, error } = await supabase.functions.invoke('generate-image', {
-        body: { imagePrompt: seg.image_prompt, projectId: project.id, segmentId: seg.id, sequenceNumber: seg.sequence_number, momentType: seg.moment_type },
+        body: {
+          imagePrompt: sc.image_prompt,
+          projectId: project.id,
+          segmentId: seg.id,
+          sequenceNumber: seg.sequence_number,
+          subIndex: sc.sub_index,
+          momentType: seg.moment_type,
+        },
       });
       if (error) throw error;
-      updateSegment(index, { image_url: data.imageUrl, image_status: 'done' });
-      await supabase.from('segments').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', seg.id);
+      updateSubSceneInSegments(seg.id, subSceneId, { image_url: data.imageUrl, image_status: 'done' });
+      await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', subSceneId);
     } catch {
-      updateSegment(index, { image_status: 'error' });
+      updateSubSceneInSegments(seg.id, subSceneId, { image_status: 'error' });
     } finally {
-      setGenImageId(null);
+      setGenSubSceneId(null);
     }
   };
 
@@ -261,12 +305,12 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <span className="text-muted-foreground">Imagens {imagesDone}/{segments.length}</span>
-            <Progress value={(imagesDone / segments.length) * 100} className="mt-1" />
+            <span className="text-muted-foreground">Imagens {subScenesDone}/{totalSubScenes}</span>
+            <Progress value={totalSubScenes > 0 ? (subScenesDone / totalSubScenes) * 100 : 0} className="mt-1" />
           </div>
           <div>
             <span className="text-muted-foreground">Áudios {audiosDone}/{segments.length}</span>
-            <Progress value={(audiosDone / segments.length) * 100} className="mt-1" />
+            <Progress value={segments.length > 0 ? (audiosDone / segments.length) * 100 : 0} className="mt-1" />
           </div>
         </div>
         {statusText && <p className="text-xs text-muted-foreground">{statusText}</p>}
@@ -285,10 +329,11 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             segment={seg}
             showMedia
             onUpdate={updates => updateSegment(i, updates)}
-            onGenerateImage={() => handleGenerateSingleImage(i)}
+            onGenerateImage={(subSceneId) => handleGenerateSingleImage(i, subSceneId)}
             onGenerateAudio={() => handleGenerateSingleAudio(i)}
-            generatingImage={genImageId === seg.id}
+            generatingImage={false}
             generatingAudio={genAudioId === seg.id}
+            generatingSubSceneId={genSubSceneId}
           />
         ))}
       </div>

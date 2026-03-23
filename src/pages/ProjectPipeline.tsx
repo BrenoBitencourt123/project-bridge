@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { Project, Segment, getMaxStep } from '@/types/atlas';
+import { Project, Segment, SubScene, getMaxStep } from '@/types/atlas';
 import { StepperHeader } from '@/components/pipeline/StepperHeader';
 import { ScriptStep } from '@/components/pipeline/ScriptStep';
 import { SegmentsStep } from '@/components/pipeline/SegmentsStep';
@@ -33,9 +33,33 @@ export default function ProjectPipeline() {
   const { data: segments = [] } = useQuery({
     queryKey: ['segments', id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('segments').select('*').eq('project_id', id!).order('sequence_number');
+      // Fetch segments
+      const { data: segs, error } = await supabase
+        .from('segments')
+        .select('*')
+        .eq('project_id', id!)
+        .order('sequence_number');
       if (error) throw error;
-      return data as Segment[];
+
+      if (!segs || segs.length === 0) return [] as Segment[];
+
+      // Fetch sub_scenes for all segments
+      const segmentIds = segs.map(s => s.id);
+      const { data: subScenes, error: subErr } = await supabase
+        .from('sub_scenes')
+        .select('*')
+        .in('segment_id', segmentIds)
+        .order('sub_index');
+
+      if (subErr) console.error('Error loading sub_scenes:', subErr);
+
+      // Attach sub_scenes to segments
+      return segs.map(seg => ({
+        ...seg,
+        sub_scenes: (subScenes || [])
+          .filter((sc: any) => sc.segment_id === seg.id)
+          .sort((a: any, b: any) => a.sub_index - b.sub_index) as SubScene[],
+      })) as Segment[];
     },
   });
 
