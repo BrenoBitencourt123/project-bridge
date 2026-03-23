@@ -12,9 +12,7 @@ interface SegmentCardProps {
   showMedia?: boolean;
   onUpdate: (updates: Partial<Segment>) => void;
   onGenerateImage?: (subSceneId?: string) => void;
-  onGenerateAudio?: () => void;
   generatingImage?: boolean;
-  generatingAudio?: boolean;
   generatingSubSceneId?: string | null;
 }
 
@@ -46,6 +44,7 @@ function SubSceneCard({
       <div className="flex items-center gap-2">
         <Badge variant="outline" className="text-[10px]">Sub {subScene.sub_index}</Badge>
         <StatusDot status={subScene.image_status} />
+        <StatusDot status={subScene.audio_status} />
         <span className="text-xs text-muted-foreground truncate flex-1">{subScene.narration_segment.slice(0, 50)}...</span>
       </div>
 
@@ -74,6 +73,9 @@ function SubSceneCard({
           {subScene.image_url && (
             <img src={subScene.image_url} alt={`Sub-cena ${subScene.sub_index}`} className="rounded-md max-h-32 object-contain" />
           )}
+          {subScene.audio_url && (
+            <audio controls src={subScene.audio_url} className="w-full h-8" />
+          )}
           {onGenerateImage && (
             <Button variant="outline" size="sm" onClick={onGenerateImage} disabled={generating} className="text-xs h-7">
               {generating ? <Loader2 className="animate-spin h-3 w-3" /> : <Image className="h-3 w-3" />}
@@ -91,9 +93,7 @@ export function SegmentCard({
   showMedia,
   onUpdate,
   onGenerateImage,
-  onGenerateAudio,
   generatingImage,
-  generatingAudio,
   generatingSubSceneId,
 }: SegmentCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -108,29 +108,27 @@ export function SegmentCard({
     onUpdate({ sub_scenes: updatedSubs });
   };
 
-  // Overall image status based on sub-scenes
   const subImagesDone = subScenes.filter(sc => sc.image_status === 'done').length;
+  const subAudiosDone = subScenes.filter(sc => sc.audio_status === 'done').length;
   const subImagesTotal = subScenes.length;
 
   return (
     <div className="rounded-lg border bg-card">
-      {/* Collapsed header */}
       <button className="flex w-full items-center gap-3 p-3 text-left" onClick={() => setExpanded(!expanded)}>
         <span className="text-xs font-mono text-muted-foreground w-8">{String(segment.sequence_number).padStart(3, '0')}</span>
         {momentCfg && <Badge className={`text-[10px] ${momentCfg.color}`}>{momentCfg.label}</Badge>}
         <p className="flex-1 text-sm line-clamp-2">{segment.narration}</p>
         <div className="flex items-center gap-1.5">
-          {subImagesTotal > 0 ? (
-            <span className="text-[10px] text-muted-foreground">{subImagesDone}/{subImagesTotal}</span>
-          ) : (
-            <StatusDot status={segment.image_status} />
+          {subImagesTotal > 0 && (
+            <>
+              <span className="text-[10px] text-muted-foreground">🖼 {subImagesDone}/{subImagesTotal}</span>
+              <span className="text-[10px] text-muted-foreground">🔊 {subAudiosDone}/{subImagesTotal}</span>
+            </>
           )}
-          <StatusDot status={segment.audio_status} />
         </div>
         <ChevronDown className={cn('h-4 w-4 transition-transform text-muted-foreground', expanded && 'rotate-180')} />
       </button>
 
-      {/* Expanded */}
       {expanded && (
         <div className="border-t px-3 pb-3 pt-3 space-y-3">
           <div className="space-y-1">
@@ -146,7 +144,6 @@ export function SegmentCard({
             <Input value={segment.symbolism || ''} onChange={e => onUpdate({ symbolism: e.target.value })} className="text-sm" />
           </div>
 
-          {/* Sub-scenes */}
           {subScenes.length > 0 && (
             <div className="space-y-2 pt-2">
               <label className="text-xs font-medium text-muted-foreground">Sub-cenas ({subScenes.length})</label>
@@ -160,22 +157,6 @@ export function SegmentCard({
                   generating={generatingSubSceneId === sc.id}
                 />
               ))}
-            </div>
-          )}
-
-          {showMedia && (
-            <div className="space-y-3 pt-2">
-              {segment.audio_url && (
-                <audio controls src={segment.audio_url} className="w-full h-8" />
-              )}
-              <div className="flex gap-2">
-                {onGenerateAudio && (
-                  <Button variant="outline" size="sm" onClick={onGenerateAudio} disabled={generatingAudio}>
-                    {generatingAudio ? <Loader2 className="animate-spin h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
-                    Gerar Áudio
-                  </Button>
-                )}
-              </div>
             </div>
           )}
         </div>

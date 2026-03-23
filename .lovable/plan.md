@@ -1,70 +1,42 @@
 
 
-# Áudio por Sub-cena (1 áudio = 1 imagem)
+# Migração para Segmentação em 2 Níveis (Blocos + Sub-cenas)
 
-## Objetivo
+## Visão Geral
 
-Mudar o fluxo de áudio de "1 por bloco/segmento" para "1 por sub-cena". O áudio completo é gerado a partir do roteiro inteiro (garantindo consistência de voz), depois fatiado nos pontos de corte de cada sub-cena. Resultado: cada sub-cena tem 1 imagem + 1 áudio — basta arrastar tudo na timeline do editor.
+Migrar a estrutura de segmentação de "linear" (1 segmento = 1 imagem = 1 áudio) para "2 níveis" (1 bloco = 1 áudio + 1-4 sub-cenas/imagens), inspirado no repositório Atlas-new-creators.
 
-## Mudanças no Banco de Dados
+**Resultado:** Cada bloco de narração (30-90 palavras) gera UM áudio contínuo e 1-4 imagens que alternam durante aquele trecho, criando vídeos mais dinâmicos.
 
-Adicionar `audio_url` e `audio_status` à tabela `sub_scenes`:
+**UPDATE:** Migrado para 1 áudio por sub-cena. O áudio completo é gerado do roteiro inteiro e fatiado nos pontos de corte de cada sub-cena. Cada sub-cena tem 1 imagem + 1 áudio.
 
-```sql
-ALTER TABLE public.sub_scenes
-  ADD COLUMN audio_url TEXT,
-  ADD COLUMN audio_status public.media_status NOT NULL DEFAULT 'idle';
-```
+---
 
-## Mudanças nos Tipos
+## Status de Implementação
 
-`SubScene` ganha `audio_url` e `audio_status`.
+1. ✅ Migration DB: tabela `sub_scenes` com RLS + colunas `audio_url`/`audio_status`
+2. ✅ Tipos TypeScript: `SubScene` com campos de áudio
+3. ✅ Atualizar `segment-script` (blocos maiores)
+4. ✅ Função `splitIntoSubScenes` no frontend
+5. ✅ Atualizar `SegmentsStep` para criar sub-cenas
+6. ✅ Atualizar `SegmentCard` para mostrar sub-cenas com audio player individual
+7. ✅ Atualizar `MediaStep` para gerar imagens por sub-cena + áudio fatiado por sub-cena
+8. ✅ Atualizar `ExportStep` para ZIP com imagens E áudios por sub-cena
+9. ✅ Carregar sub-cenas na query do `ProjectPipeline`
+10. ✅ `findSubSceneCutPoints` em find-cut-points.ts
 
-## Lógica de Corte (find-cut-points)
-
-Atualmente corta por segmento. Será alterado para cortar por sub-cena:
-- Flatten todas as sub-cenas de todos os segmentos em ordem
-- Buscar o texto de cada sub-cena no alinhamento para encontrar o cut time
-- Retornar `(totalSubScenes - 1)` cut points
-
-## MediaStep — Gerar Todos Áudios
-
-Fluxo atualizado:
+## Arquitetura Final
 
 ```text
-1. generate-audio-batch (roteiro completo) → áudio + alignment
-2. Flatten sub-cenas em ordem: seg1-sub1, seg1-sub2, seg2-sub1...
-3. findSubSceneCutPoints(rawScript, alignment, allSubScenes)
-4. splitAudio nos cut points → 1 blob por sub-cena
-5. Upload cada blob → sub_scenes.audio_url
-6. Atualizar sub_scenes.audio_status = 'done'
+Roteiro → segment-script (blocos de 30-90 palavras)
+       → splitIntoSubScenes (1-4 sub-cenas por bloco)
+       → INSERT segments + sub_scenes no DB
+
+Mídia:
+  Imagens → 1 por sub-cena
+  Áudios  → áudio completo gerado do roteiro inteiro
+          → fatiado por sub-cena usando alignment
+          → 1 .wav por sub-cena
+
+Export → ZIP com segment-001-sub-1.png + segment-001-sub-1.wav etc.
 ```
-
-Mesmo fluxo para "Enviar Áudio" (importação manual).
-
-## MediaStep — Progress e Status
-
-- Progress de áudio conta sub-cenas (não segmentos)
-- `allDone` verifica imagens E áudios por sub-cena
-- O campo `segments.audio_status/audio_url` vira um resumo (all sub-scenes done → segment done) ou simplesmente não é mais usado
-
-## SegmentCard
-
-- Player de áudio aparece em cada sub-cena (não no nível do bloco)
-- Status dots de áudio por sub-cena
-
-## ExportStep
-
-- ZIP exporta `segment-001-sub-1.wav`, `segment-001-sub-2.wav` etc.
-- Cada arquivo de imagem já tem esse padrão
-
-## Arquivos Alterados
-
-1. **Migration SQL** — adicionar `audio_url`, `audio_status` em `sub_scenes`
-2. **`src/types/atlas.ts`** — `SubScene` ganha campos de áudio
-3. **`src/lib/find-cut-points.ts`** — nova função `findSubSceneCutPoints` que opera sobre sub-cenas
-4. **`src/components/pipeline/MediaStep.tsx`** — fluxo de áudio fatia por sub-cena, progress por sub-cena
-5. **`src/components/pipeline/SegmentCard.tsx`** — audio player por sub-cena
-6. **`src/components/pipeline/ExportStep.tsx`** — export áudio por sub-cena
-7. **`src/pages/ProjectPipeline.tsx`** — carregar `audio_url`/`audio_status` das sub-cenas
-

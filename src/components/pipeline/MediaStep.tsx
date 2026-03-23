@@ -7,7 +7,7 @@ import { Project, Segment, SubScene } from '@/types/atlas';
 import { SegmentCard } from './SegmentCard';
 import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
-import { findSegmentCutPoints } from '@/lib/find-cut-points';
+import { findSubSceneCutPoints } from '@/lib/find-cut-points';
 import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
@@ -29,15 +29,13 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [audioProgress, setAudioProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
   const [genSubSceneId, setGenSubSceneId] = useState<string | null>(null);
-  const [genAudioId, setGenAudioId] = useState<string | null>(null);
 
-  // Count sub-scenes for image progress
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
+  const subAudiosDone = allSubScenes.filter(sc => sc.audio_status === 'done').length;
   const totalSubScenes = allSubScenes.length;
 
-  const audiosDone = segments.filter(s => s.audio_status === 'done').length;
-  const allDone = subScenesDone === totalSubScenes && audiosDone === segments.length && totalSubScenes > 0;
+  const allDone = subScenesDone === totalSubScenes && subAudiosDone === totalSubScenes && totalSubScenes > 0;
 
   const updateSegment = (index: number, updates: Partial<Segment>) => {
     const updated = [...segments];
@@ -124,6 +122,31 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     setGeneratingImages(false);
   };
 
+  const flattenSubScenes = (): { subScene: SubScene; segment: Segment; flatIndex: number }[] => {
+    const flat: { subScene: SubScene; segment: Segment; flatIndex: number }[] = [];
+    let idx = 0;
+    for (const seg of segments) {
+      for (const sc of (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index)) {
+        flat.push({ subScene: sc, segment: seg, flatIndex: idx++ });
+      }
+    }
+    return flat;
+  };
+
+  const uploadSubSceneAudios = async (blobs: Blob[], flatSubs: { subScene: SubScene; segment: Segment }[]) => {
+    for (let i = 0; i < blobs.length && i < flatSubs.length; i++) {
+      const { subScene: sc, segment: seg } = flatSubs[i];
+      const num = String(seg.sequence_number).padStart(3, '0');
+      const fileName = `${project.id}/segment-${num}-sub-${sc.sub_index}.wav`;
+      const { error: uploadErr } = await supabase.storage.from('segment-audio').upload(fileName, blobs[i], { upsert: true, contentType: 'audio/wav' });
+      if (uploadErr) { console.error(uploadErr); continue; }
+      const { data: urlData } = supabase.storage.from('segment-audio').getPublicUrl(fileName);
+      updateSubSceneInSegments(seg.id, sc.id, { audio_url: urlData.publicUrl, audio_status: 'done' });
+      await supabase.from('sub_scenes').update({ audio_url: urlData.publicUrl, audio_status: 'done' }).eq('id', sc.id);
+      setAudioProgress(((i + 1) / flatSubs.length) * 100);
+    }
+  };
+
   const handleGenerateAllAudios = async () => {
     setGeneratingAudios(true);
     setAudioProgress(0);
@@ -139,9 +162,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         ? mergeAlignments(data.chunks.map((c: any) => c.alignment))
         : data.alignment;
 
-      const cutTimes = findSegmentCutPoints(project.raw_script!, alignment, segments);
+      const cutTimes = findSubSceneCutPoints(project.raw_script!, alignment, segments);
 
-      setStatusText('Fatiando áudio...');
+      setStatusText('Fatiando áudio por sub-cena...');
       let blobs: Blob[];
       if (data.isChunked) {
         blobs = await splitChunkedAudioAtCutPoints(data.chunks.map((c: any) => c.audioBase64), cutTimes);
@@ -150,17 +173,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         blobs = await splitAudioAtCutPoints(audioBytes.buffer, cutTimes);
       }
 
-      setStatusText('Enviando segmentos...');
-      for (let i = 0; i < blobs.length && i < segments.length; i++) {
-        const seg = segments[i];
-        const fileName = `${project.id}/segment-${String(seg.sequence_number).padStart(3, '0')}.wav`;
-        const { error: uploadErr } = await supabase.storage.from('segment-audio').upload(fileName, blobs[i], { upsert: true, contentType: 'audio/wav' });
-        if (uploadErr) { console.error(uploadErr); continue; }
-        const { data: urlData } = supabase.storage.from('segment-audio').getPublicUrl(fileName);
-        updateSegment(i, { audio_url: urlData.publicUrl, audio_status: 'done' });
-        await supabase.from('segments').update({ audio_url: urlData.publicUrl, audio_status: 'done' }).eq('id', seg.id);
-        setAudioProgress(((i + 1) / segments.length) * 100);
-      }
+      setStatusText('Enviando áudios das sub-cenas...');
+      const flatSubs = flattenSubScenes();
+      await uploadSubSceneAudios(blobs, flatSubs);
 
       await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
       onUpdate({ status: 'audio_done' });
@@ -194,9 +209,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
       setStatusText('Processando alinhamento...');
       const mergedAlignment = mergeAlignments(alignments);
-      const cutTimes = findSegmentCutPoints(project.raw_script!, mergedAlignment, segments);
+      const cutTimes = findSubSceneCutPoints(project.raw_script!, mergedAlignment, segments);
 
-      setStatusText('Fatiando áudio...');
+      setStatusText('Fatiando áudio por sub-cena...');
       const totalLength = audioBuffers.reduce((sum, b) => sum + b.byteLength, 0);
       const merged = new Uint8Array(totalLength);
       let offset = 0;
@@ -206,16 +221,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       }
       const blobs = await splitAudioAtCutPoints(merged.buffer, cutTimes);
 
-      setStatusText('Enviando segmentos...');
-      for (let i = 0; i < blobs.length && i < segments.length; i++) {
-        const seg = segments[i];
-        const fileName = `${project.id}/segment-${String(seg.sequence_number).padStart(3, '0')}.wav`;
-        await supabase.storage.from('segment-audio').upload(fileName, blobs[i], { upsert: true, contentType: 'audio/wav' });
-        const { data: urlData } = supabase.storage.from('segment-audio').getPublicUrl(fileName);
-        updateSegment(i, { audio_url: urlData.publicUrl, audio_status: 'done' });
-        await supabase.from('segments').update({ audio_url: urlData.publicUrl, audio_status: 'done' }).eq('id', seg.id);
-        setAudioProgress(((i + 1) / segments.length) * 100);
-      }
+      setStatusText('Enviando áudios das sub-cenas...');
+      const flatSubs = flattenSubScenes();
+      await uploadSubSceneAudios(blobs, flatSubs);
 
       await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
       onUpdate({ status: 'audio_done' });
@@ -259,26 +267,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     }
   };
 
-  const handleGenerateSingleAudio = async (index: number) => {
-    const seg = segments[index];
-    setGenAudioId(seg.id);
-    updateSegment(index, { audio_status: 'generating' });
-    try {
-      const prev = index > 0 ? segments[index - 1].narration : undefined;
-      const next = index < segments.length - 1 ? segments[index + 1].narration : undefined;
-      const { data, error } = await supabase.functions.invoke('generate-audio', {
-        body: { narration: seg.narration, projectId: project.id, segmentId: seg.id, sequenceNumber: seg.sequence_number, previousText: prev, nextText: next },
-      });
-      if (error) throw error;
-      updateSegment(index, { audio_url: data.audioUrl, audio_status: 'done' });
-      await supabase.from('segments').update({ audio_url: data.audioUrl, audio_status: 'done' }).eq('id', seg.id);
-    } catch {
-      updateSegment(index, { audio_status: 'error' });
-    } finally {
-      setGenAudioId(null);
-    }
-  };
-
   return (
     <div className="space-y-4">
       {/* HUD */}
@@ -309,8 +297,8 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             <Progress value={totalSubScenes > 0 ? (subScenesDone / totalSubScenes) * 100 : 0} className="mt-1" />
           </div>
           <div>
-            <span className="text-muted-foreground">Áudios {audiosDone}/{segments.length}</span>
-            <Progress value={segments.length > 0 ? (audiosDone / segments.length) * 100 : 0} className="mt-1" />
+            <span className="text-muted-foreground">Áudios {subAudiosDone}/{totalSubScenes}</span>
+            <Progress value={totalSubScenes > 0 ? (subAudiosDone / totalSubScenes) * 100 : 0} className="mt-1" />
           </div>
         </div>
         {statusText && <p className="text-xs text-muted-foreground">{statusText}</p>}
@@ -330,9 +318,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             showMedia
             onUpdate={updates => updateSegment(i, updates)}
             onGenerateImage={(subSceneId) => handleGenerateSingleImage(i, subSceneId)}
-            onGenerateAudio={() => handleGenerateSingleAudio(i)}
             generatingImage={false}
-            generatingAudio={genAudioId === seg.id}
             generatingSubSceneId={genSubSceneId}
           />
         ))}
