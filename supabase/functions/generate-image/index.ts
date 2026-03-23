@@ -12,7 +12,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { imagePrompt, projectId, segmentId, sequenceNumber, momentType } = await req.json();
+    const { imagePrompt, projectId, segmentId, sequenceNumber, subIndex, momentType } = await req.json();
     if (!imagePrompt || !projectId) throw new Error("imagePrompt and projectId required");
 
     const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
