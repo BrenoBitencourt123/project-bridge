@@ -11,6 +11,7 @@ interface ExportStepProps {
 
 export function ExportStep({ projectTitle, segments }: ExportStepProps) {
   const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
 
   const allSubScenes = segments.flatMap(s =>
     (s.sub_scenes || [])
@@ -21,26 +22,47 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
 
   const handleDownload = async () => {
     setDownloading(true);
+    setProgress({ done: 0, total: totalFiles });
     try {
       const zip = new JSZip();
+
+      // Build list of all files to fetch
+      const tasks: { url: string; name: string }[] = [];
       for (const seg of segments) {
         const num = String(seg.sequence_number).padStart(3, '0');
-
         for (const sc of (seg.sub_scenes || [])) {
-          // Image
           if (sc.image_url && sc.image_status === 'done') {
-            const res = await fetch(sc.image_url);
-            const blob = await res.blob();
-            zip.file(`segment-${num}-sub-${sc.sub_index}.png`, blob);
+            tasks.push({ url: sc.image_url, name: `segment-${num}-sub-${sc.sub_index}.png` });
           }
-          // Audio
           if (sc.audio_url && sc.audio_status === 'done') {
-            const res = await fetch(sc.audio_url);
-            const blob = await res.blob();
-            zip.file(`segment-${num}-sub-${sc.sub_index}.wav`, blob);
+            tasks.push({ url: sc.audio_url, name: `segment-${num}-sub-${sc.sub_index}.wav` });
           }
         }
       }
+
+      // Parallel fetch with concurrency limit
+      let completed = 0;
+      const CONCURRENCY = 6;
+      const queue = [...tasks];
+
+      const worker = async () => {
+        while (queue.length > 0) {
+          const task = queue.shift();
+          if (!task) break;
+          try {
+            const res = await fetch(task.url);
+            const blob = await res.blob();
+            zip.file(task.name, blob);
+          } catch (e) {
+            console.warn(`Failed to fetch ${task.name}:`, e);
+          }
+          completed++;
+          setProgress({ done: completed, total: tasks.length });
+        }
+      };
+
+      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+
       const content = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(content);
       const a = document.createElement('a');
