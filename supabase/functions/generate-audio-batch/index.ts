@@ -47,23 +47,20 @@ serve(async (req) => {
     const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
     if (!ELEVENLABS_API_KEY) throw new Error("ELEVENLABS_API_KEY not configured");
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get voice settings
+    // Get voice settings from user's profile
     const authHeader = req.headers.get("Authorization");
     let voiceSettings: any = null;
     if (authHeader) {
-      const userSupabase = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!,
-        { global: { headers: { Authorization: authHeader } } }
-      );
-      const { data: claims } = await userSupabase.auth.getClaims(authHeader.replace("Bearer ", ""));
-      if (claims?.claims?.sub) {
-        const { data: profile } = await supabase.from("profiles").select("voice_settings").eq("user_id", claims.claims.sub).single();
+      const userSupabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user } } = await userSupabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase.from("profiles").select("voice_settings").eq("user_id", user.id).single();
         voiceSettings = profile?.voice_settings;
       }
     }
