@@ -41,7 +41,7 @@ export default function VoiceSettings() {
   const loadProfile = async () => {
     const { data } = await supabase.from('profiles').select('voice_settings').eq('user_id', user!.id).single();
     if (data?.voice_settings) {
-      setSettings({ ...DEFAULT_SETTINGS, ...(data.voice_settings as VoiceSettingsType) });
+      setSettings({ ...DEFAULT_SETTINGS, ...(data.voice_settings as unknown as VoiceSettingsType) });
     }
   };
 
