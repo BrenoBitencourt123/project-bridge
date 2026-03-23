@@ -135,7 +135,7 @@ export default function ProjectPipeline() {
           <SegmentsStep project={localProject} segments={localSegments} onSegmentsChange={setLocalSegments} onUpdate={updateProject} onNext={() => setCurrentStep(2)} />
         )}
         {currentStep === 2 && (
-          <MediaStep project={localProject} segments={localSegments} onSegmentsChange={setLocalSegments} onUpdate={updateProject} onNext={() => setCurrentStep(3)} />
+          <MediaStep project={localProject} segments={localSegments} onSegmentsChange={setLocalSegments} onUpdate={updateProject} onNext={() => setCurrentStep(3)} onGeneratingChange={setIsGenerating} />
         )}
         {currentStep === 3 && (
           <ExportStep projectTitle={localProject.title} segments={localSegments} />
