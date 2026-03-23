@@ -46,44 +46,15 @@ Wide format, visually compelling, suitable for YouTube thumbnail.`;
     }
 
     const result = await response.json();
-    const content = result.choices?.[0]?.message?.content;
+    const images = result.choices?.[0]?.message?.images;
+    if (!images || images.length === 0) throw new Error("No image generated");
 
-    // Extract base64 image from response
-    let imageBase64: string | null = null;
-    let mimeType = "image/png";
+    const imageDataUrl = images[0].image_url.url;
+    const base64Data = imageDataUrl.split(",")[1];
+    if (!base64Data) throw new Error("Invalid image data received");
 
-    if (typeof content === "string") {
-      // Check for inline base64 image pattern
-      const b64Match = content.match(/data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)/);
-      if (b64Match) {
-        mimeType = b64Match[1];
-        imageBase64 = b64Match[2];
-      }
-    } else if (Array.isArray(content)) {
-      const imgPart = content.find((p: any) => p.type === "image_url" || (p.type === "image" && p.source?.data));
-      if (imgPart?.source?.data) {
-        imageBase64 = imgPart.source.data;
-        mimeType = imgPart.source?.media_type || "image/png";
-      } else if (imgPart?.image_url?.url) {
-        const urlMatch = imgPart.image_url.url.match(/data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)/);
-        if (urlMatch) {
-          mimeType = urlMatch[1];
-          imageBase64 = urlMatch[2];
-        }
-      }
-    }
-
-    // Also check for inline_data format (Gemini native)
-    if (!imageBase64) {
-      const parts = result.candidates?.[0]?.content?.parts || [];
-      const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
-      if (imagePart) {
-        imageBase64 = imagePart.inlineData.data;
-        mimeType = imagePart.inlineData.mimeType;
-      }
-    }
-
-    if (!imageBase64) throw new Error("No image generated");
+    const imageBase64 = base64Data;
+    const mimeType = "image/png";
 
     const imageBytes = base64Decode(imageBase64);
     const fileName = `${projectId}/thumbnail.png`;
