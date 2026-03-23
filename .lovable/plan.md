@@ -1,122 +1,70 @@
 
 
-# Migração para Segmentação em 2 Níveis (Blocos + Sub-cenas)
+# Áudio por Sub-cena (1 áudio = 1 imagem)
 
-## Visão Geral
+## Objetivo
 
-Migrar a estrutura de segmentação de "linear" (1 segmento = 1 imagem = 1 áudio) para "2 níveis" (1 bloco = 1 áudio + 1-4 sub-cenas/imagens), inspirado no repositório Atlas-new-creators.
-
-**Resultado:** Cada bloco de narração (30-90 palavras) gera UM áudio contínuo e 1-4 imagens que alternam durante aquele trecho, criando vídeos mais dinâmicos.
-
----
+Mudar o fluxo de áudio de "1 por bloco/segmento" para "1 por sub-cena". O áudio completo é gerado a partir do roteiro inteiro (garantindo consistência de voz), depois fatiado nos pontos de corte de cada sub-cena. Resultado: cada sub-cena tem 1 imagem + 1 áudio — basta arrastar tudo na timeline do editor.
 
 ## Mudanças no Banco de Dados
 
-**Nova tabela `sub_scenes`:**
-- `id` UUID PK
-- `segment_id` UUID FK → segments (cascade delete)
-- `sub_index` INTEGER NOT NULL (1-4)
-- `narration_segment` TEXT NOT NULL (trecho da narração do bloco)
-- `image_prompt` TEXT
-- `image_url` TEXT nullable
-- `image_status` ENUM media_status default 'idle'
-- `created_at`, `updated_at` TIMESTAMP
-- UNIQUE(segment_id, sub_index)
-- RLS: acesso via join segments → projects → user_id
+Adicionar `audio_url` e `audio_status` à tabela `sub_scenes`:
 
-**Alterações na tabela `segments`:**
-- Campo `image_url` e `image_status` continuam existindo como "resumo" (status geral do bloco), mas as imagens individuais ficam em `sub_scenes`
-- Aumentar range de narração esperado: 30-90 palavras por bloco (antes era 8-25)
-
----
-
-## Mudanças nos Tipos TypeScript
-
-**Novo tipo `SubScene`:**
-```typescript
-export interface SubScene {
-  id: string;
-  segment_id: string;
-  sub_index: number;
-  narration_segment: string;
-  image_prompt: string | null;
-  image_url: string | null;
-  image_status: MediaStatus;
-}
+```sql
+ALTER TABLE public.sub_scenes
+  ADD COLUMN audio_url TEXT,
+  ADD COLUMN audio_status public.media_status NOT NULL DEFAULT 'idle';
 ```
 
-**Segment** ganha campo opcional `sub_scenes: SubScene[]` para uso no frontend.
+## Mudanças nos Tipos
 
----
+`SubScene` ganha `audio_url` e `audio_status`.
 
-## Mudanças na Edge Function `segment-script`
+## Lógica de Corte (find-cut-points)
 
-Atualizar o prompt para gerar blocos maiores (30-90 palavras, ~40-60 blocos para roteiro de 10 min em vez de 70-95 segmentos pequenos). Cada bloco continua com `narration`, `imagePrompt`, `symbolism`, `momentType`.
+Atualmente corta por segmento. Será alterado para cortar por sub-cena:
+- Flatten todas as sub-cenas de todos os segmentos em ordem
+- Buscar o texto de cada sub-cena no alinhamento para encontrar o cut time
+- Retornar `(totalSubScenes - 1)` cut points
 
----
+## MediaStep — Gerar Todos Áudios
 
-## Lógica de Sub-cenas (Frontend)
-
-Nova função `splitIntoSubScenes(segment)` no frontend (como no repo de referência):
+Fluxo atualizado:
 
 ```text
-wordCount < 25  → 1 sub-cena
-25-49 palavras  → 2 sub-cenas
-50-74 palavras  → 3 sub-cenas
-75+ palavras    → 4 sub-cenas
+1. generate-audio-batch (roteiro completo) → áudio + alignment
+2. Flatten sub-cenas em ordem: seg1-sub1, seg1-sub2, seg2-sub1...
+3. findSubSceneCutPoints(rawScript, alignment, allSubScenes)
+4. splitAudio nos cut points → 1 blob por sub-cena
+5. Upload cada blob → sub_scenes.audio_url
+6. Atualizar sub_scenes.audio_status = 'done'
 ```
 
-Divide a narração do bloco em sentenças e distribui entre as sub-cenas. Cada sub-cena recebe um prompt de imagem com ângulo/perspectiva diferente.
+Mesmo fluxo para "Enviar Áudio" (importação manual).
 
----
+## MediaStep — Progress e Status
 
-## Mudanças nos Componentes
+- Progress de áudio conta sub-cenas (não segmentos)
+- `allDone` verifica imagens E áudios por sub-cena
+- O campo `segments.audio_status/audio_url` vira um resumo (all sub-scenes done → segment done) ou simplesmente não é mais usado
 
-### SegmentsStep
-- Após segmentar, criar sub-cenas automaticamente para cada bloco usando `splitIntoSubScenes`
-- INSERT sub-cenas na nova tabela `sub_scenes`
+## SegmentCard
 
-### SegmentCard
-- Expandido mostra as sub-cenas como cards internos (1-4 mini-cards com preview de imagem)
-- Cada sub-cena tem seu próprio prompt editável e botão "Gerar Imagem"
+- Player de áudio aparece em cada sub-cena (não no nível do bloco)
+- Status dots de áudio por sub-cena
 
-### MediaStep
-- "Gerar Todas Imagens" itera por sub-cenas (não por segmentos)
-- Progress bar conta sub-cenas totais
-- O áudio continua sendo 1 por bloco (sem mudança no fluxo de áudio)
+## ExportStep
 
-### ExportStep
-- ZIP exporta imagens nomeadas como `segment-001-sub-1.png`, `segment-001-sub-2.png`, etc.
-- Áudios continuam `segment-001.wav`
+- ZIP exporta `segment-001-sub-1.wav`, `segment-001-sub-2.wav` etc.
+- Cada arquivo de imagem já tem esse padrão
 
----
+## Arquivos Alterados
 
-## Fluxo Resumido
-
-```text
-Roteiro → segment-script (blocos de 30-90 palavras)
-       → splitIntoSubScenes (1-4 sub-cenas por bloco)
-       → INSERT segments + sub_scenes no DB
-
-Mídia:
-  Imagens → gerar 1 por sub-cena (total: ~120-200 imagens)
-  Áudios  → 1 por bloco (total: ~40-60 áudios)
-            OU batch completo + split (mesmo fluxo atual)
-
-Export → ZIP com imagens por sub-cena + áudios por bloco
-```
-
----
-
-## Ordem de Implementação
-
-1. Migration DB: criar tabela `sub_scenes` com RLS
-2. Tipos TypeScript: adicionar `SubScene`
-3. Atualizar `segment-script` (blocos maiores)
-4. Função `splitIntoSubScenes` no frontend
-5. Atualizar `SegmentsStep` para criar sub-cenas
-6. Atualizar `SegmentCard` para mostrar sub-cenas
-7. Atualizar `MediaStep` para gerar imagens por sub-cena
-8. Atualizar `ExportStep` para ZIP com sub-cenas
-9. Carregar sub-cenas na query do `ProjectPipeline`
+1. **Migration SQL** — adicionar `audio_url`, `audio_status` em `sub_scenes`
+2. **`src/types/atlas.ts`** — `SubScene` ganha campos de áudio
+3. **`src/lib/find-cut-points.ts`** — nova função `findSubSceneCutPoints` que opera sobre sub-cenas
+4. **`src/components/pipeline/MediaStep.tsx`** — fluxo de áudio fatia por sub-cena, progress por sub-cena
+5. **`src/components/pipeline/SegmentCard.tsx`** — audio player por sub-cena
+6. **`src/components/pipeline/ExportStep.tsx`** — export áudio por sub-cena
+7. **`src/pages/ProjectPipeline.tsx`** — carregar `audio_url`/`audio_status` das sub-cenas
 
