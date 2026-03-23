@@ -153,6 +153,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
   const handleGenerateAllAudios = async () => {
     setGeneratingAudios(true);
+    onGeneratingChange?.(true);
     setAudioProgress(0);
     setStatusText('Gerando áudio completo...');
     try {
