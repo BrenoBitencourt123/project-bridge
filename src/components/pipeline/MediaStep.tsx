@@ -8,6 +8,7 @@ import { SegmentCard } from './SegmentCard';
 import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
 import { findSubSceneCutPoints } from '@/lib/find-cut-points';
+import { AudioImportDialog } from './AudioImportDialog';
 import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
