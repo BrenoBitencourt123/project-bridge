@@ -1,46 +1,27 @@
 
 
-# Prompts de Imagem em PT-BR + Instruções do Repo de Referência
+# Corrigir Sub-cenas Muito Curtas (Mínimo 5-7s)
 
 ## Problema
 
-Os prompts de imagem (`imagePrompt`) estão sendo gerados em inglês pelo `segment-script` e `regenerate-prompts`. Quando o Gemini gera a imagem, qualquer texto visível (placas, fórmulas, rótulos) sai em inglês. Além disso, o `styleGuide` no `generate-image` é básico comparado ao repo de referência, que tem regras detalhadas sobre linguagem, composição e anti-narração.
+A função `splitIntoSubScenes` divide por contagem de palavras e sentenças, mas a distribuição de sentenças pode ser muito desigual — uma sub-cena pode ficar com apenas 1 frase curta (3-5 palavras ≈ 1 segundo de narração). Além disso, o `findSubSceneCutPoints` não impõe duração mínima entre cortes.
 
-## Mudanças
+## Solução (2 arquivos)
 
-### 1. `segment-script/index.ts` — Prompts em PT-BR
-- Adicionar instrução explícita: "O campo imagePrompt DEVE ser escrito em português brasileiro (PT-BR)"
-- Adicionar regra: "Se a imagem tiver textos visíveis (rótulos, placas, fórmulas), eles devem estar em PT-BR"
+### 1. `src/lib/split-sub-scenes.ts` — Garantir mínimo de palavras por sub-cena
 
-### 2. `regenerate-prompts/index.ts` — Mesma regra PT-BR
-- Adicionar instrução: "imagePrompt deve ser em PT-BR"
-- Adicionar regra de textos visíveis em português
+- Aumentar os thresholds de palavras: `<30→1, <55→2, <80→3, 80+→4` (antes: 25/50/75)
+- Após distribuir sentenças, validar que cada sub-cena tenha no mínimo ~15 palavras (~6 segundos a 150 palavras/min)
+- Se uma sub-cena ficar abaixo do mínimo, mesclar com a anterior
+- Isso evita sub-cenas de 1-3 palavras que resultam em imagens que "piscam"
 
-### 3. `generate-image/index.ts` — Style guide completo (inspirado no repo)
-Substituir o `styleGuide` básico atual por instruções detalhadas do repo de referência:
+### 2. `src/lib/find-cut-points.ts` — Impor duração mínima entre cortes
 
-**Regras adotadas do repo:**
-- `CRITICAL LANGUAGE RULE`: Todo texto visível na imagem DEVE ser em PT-BR, NUNCA em inglês
-- `ANTI-NARRATION TEXT RULE`: Nunca transcrever frases completas da narração — texto visível máximo 1-4 palavras (títulos, rótulos, valores numéricos)
-- `ACRONYM RULE`: Acrônimos na forma abreviada correta, nunca soletrados foneticamente
-- `COMPOSITION RULE`: Elemento principal no centro (60-70% do frame), contexto nas bordas
-- Aspect ratio 16:9 (1920x1080) — widescreen obrigatório
-- Nunca incluir nomes de marca/canal/logos
-- Manter o estilo sketch em papel bege com azul como cor de destaque (ao invés de laranja do repo, mantendo a identidade do projeto)
+- Após calcular os cut points, adicionar validação de gap mínimo de 5 segundos
+- Se dois cortes consecutivos estiverem a menos de 5s, mesclar eliminando o segundo corte
+- Isso funciona como safety net mesmo que o split gere sub-cenas curtas
 
-**Prompt final montado:**
-```
-ABSOLUTE REQUIREMENT: 16:9 (1920x1080).
-CRITICAL LANGUAGE RULE: ALL text in PT-BR. NEVER English.
-ANTI-NARRATION TEXT RULE: Max 1-4 words visible.
-Hand-drawn sketch on beige/cream paper, pencil cross-hatching,
-grayscale with ONLY blue (#4A90E2) as accent.
-COMPOSITION RULE: Main element centered (60-70%).
-Scene: ${imagePrompt}
-```
+### Resultado esperado
 
-### 4. Arquivos alterados
-- `supabase/functions/segment-script/index.ts` — 2 linhas no prompt
-- `supabase/functions/regenerate-prompts/index.ts` — 2 linhas no prompt
-- `supabase/functions/generate-image/index.ts` — substituir `styleGuide` por versão completa
+Cada sub-cena terá entre ~5-15 segundos de narração, garantindo que as imagens fiquem tempo suficiente na tela sem "piscar".
 
