@@ -21,11 +21,11 @@ interface MediaStepProps {
 
 export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext }: MediaStepProps) {
   const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [generatingImages, setGeneratingImages] = useState(false);
   const [generatingAudios, setGeneratingAudios] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [imageProgress, setImageProgress] = useState(0);
   const [audioProgress, setAudioProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
