@@ -147,6 +147,8 @@ export type Database = {
       }
       sub_scenes: {
         Row: {
+          audio_status: Database["public"]["Enums"]["media_status"]
+          audio_url: string | null
           created_at: string
           id: string
           image_prompt: string | null
@@ -158,6 +160,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          audio_status?: Database["public"]["Enums"]["media_status"]
+          audio_url?: string | null
           created_at?: string
           id?: string
           image_prompt?: string | null
@@ -169,6 +173,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          audio_status?: Database["public"]["Enums"]["media_status"]
+          audio_url?: string | null
           created_at?: string
           id?: string
           image_prompt?: string | null
