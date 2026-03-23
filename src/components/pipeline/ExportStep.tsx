@@ -111,7 +111,9 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
 
       <Button className="w-full" size="lg" onClick={handleDownload} disabled={downloading || totalFiles === 0}>
         {downloading ? <Loader2 className="animate-spin" /> : <Download className="h-4 w-4" />}
-        Baixar ZIP ({totalFiles} arquivos)
+        {downloading
+          ? `Baixando... ${progress.done}/${progress.total}`
+          : `Baixar ZIP (${totalFiles} arquivos)`}
       </Button>
     </div>
   );
