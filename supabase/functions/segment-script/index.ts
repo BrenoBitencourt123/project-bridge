@@ -21,9 +21,13 @@ REGRAS:
 - Cada bloco deve ter entre 30 e 90 palavras de narração
 - Gere entre 40 e 60 blocos para um roteiro de 10 minutos
 - O campo "narration" deve ser um trecho EXATO do roteiro original, sem modificar palavras
-- O campo "imagePrompt" deve descrever uma imagem literal e concreta para ilustrar o que é narrado
+- O campo "imagePrompt" DEVE ser escrito em português brasileiro (PT-BR)
+- Se a imagem tiver textos visíveis (rótulos, placas, fórmulas), eles DEVEM estar em PT-BR, NUNCA em inglês
+- O imagePrompt deve descrever uma imagem literal e concreta para ilustrar o que é narrado
 - NÃO use metáforas abstratas nas imagens — ilustre literalmente o que o narrador fala
 - Se houver fórmulas matemáticas na narração, inclua-as no imagePrompt
+- NUNCA inclua nomes de marca, canal ou logos no imagePrompt
+- Texto visível na imagem: máximo 1-4 palavras (títulos, rótulos, valores numéricos)
 - O campo "symbolism" deve explicar brevemente o que a imagem representa
 - O campo "momentType" deve ser um de: hook, concept, example, list_summary, cta
 - Cada bloco deve ser um trecho coeso e contínuo do roteiro, mantendo frases completas
