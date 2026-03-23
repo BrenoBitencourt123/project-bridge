@@ -284,11 +284,15 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             {generatingAudios ? <Loader2 className="animate-spin h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
             Gerar Todos Áudios
           </Button>
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingAudio}>
+          <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)} disabled={uploadingAudio}>
             {uploadingAudio ? <Loader2 className="animate-spin h-3 w-3" /> : <Upload className="h-3 w-3" />}
             Enviar Áudio
           </Button>
-          <input ref={fileInputRef} type="file" multiple accept=".mp3,.wav,.m4a" className="hidden" onChange={handleUploadAudio} />
+          <AudioImportDialog
+            open={showImportDialog}
+            onOpenChange={setShowImportDialog}
+            onConfirm={handleUploadAudio}
+          />
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
