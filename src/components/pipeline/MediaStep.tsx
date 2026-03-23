@@ -17,9 +17,10 @@ interface MediaStepProps {
   onSegmentsChange: (segments: Segment[]) => void;
   onUpdate: (updates: Partial<Project>) => void;
   onNext: () => void;
+  onGeneratingChange?: (generating: boolean) => void;
 }
 
-export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext }: MediaStepProps) {
+export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange }: MediaStepProps) {
   const { toast } = useToast();
   const [generatingImages, setGeneratingImages] = useState(false);
   const [generatingAudios, setGeneratingAudios] = useState(false);
@@ -83,6 +84,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
   const handleGenerateAllImages = async () => {
     setGeneratingImages(true);
+    onGeneratingChange?.(true);
     setImageProgress(0);
     let done = 0;
 
@@ -121,6 +123,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     await supabase.from('projects').update({ status: 'images_done', updated_at: new Date().toISOString() }).eq('id', project.id);
     onUpdate({ status: 'images_done' });
     setGeneratingImages(false);
+    onGeneratingChange?.(false);
   };
 
   const flattenSubScenes = (): { subScene: SubScene; segment: Segment; flatIndex: number }[] => {
@@ -150,6 +153,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
   const handleGenerateAllAudios = async () => {
     setGeneratingAudios(true);
+    onGeneratingChange?.(true);
     setAudioProgress(0);
     setStatusText('Gerando áudio completo...');
     try {
@@ -185,6 +189,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       toast({ title: 'Erro ao gerar áudios', description: err.message, variant: 'destructive' });
     } finally {
       setGeneratingAudios(false);
+      onGeneratingChange?.(false);
       setStatusText('');
     }
   };
