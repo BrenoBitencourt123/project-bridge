@@ -14,27 +14,31 @@ serve(async (req) => {
     const { projectId, projectTitle, userPrompt } = await req.json();
     if (!projectId) throw new Error("projectId required");
 
-    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
-    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY not configured");
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const prompt = `Hand-drawn sketch style thumbnail on beige/cream paper background. Pencil line drawing with blue (#4A90E2) accents. Educational video thumbnail for: "${projectTitle}". ${userPrompt || ""}. Wide format, visually compelling, suitable for YouTube thumbnail.`;
+    const prompt = `ABSOLUTE REQUIREMENT: 16:9 (1920x1080) widescreen.
+Hand-drawn sketch style thumbnail on beige/cream paper background. Pencil line drawing with blue (#4A90E2) accents.
+CRITICAL LANGUAGE RULE: ALL visible text MUST be in PT-BR. NEVER English.
+Educational video thumbnail for: "${projectTitle}". ${userPrompt || ""}.
+Wide format, visually compelling, suitable for YouTube thumbnail.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GOOGLE_AI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseModalities: ["IMAGE", "TEXT"], temperature: 0.4 },
-        }),
-      }
-    );
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3-pro-image-preview",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
 
     if (!response.ok) {
       const errText = await response.text();
@@ -42,14 +46,49 @@ serve(async (req) => {
     }
 
     const result = await response.json();
-    const parts = result.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
-    if (!imagePart) throw new Error("No image generated");
+    const content = result.choices?.[0]?.message?.content;
 
-    const imageBytes = base64Decode(imagePart.inlineData.data);
+    // Extract base64 image from response
+    let imageBase64: string | null = null;
+    let mimeType = "image/png";
+
+    if (typeof content === "string") {
+      // Check for inline base64 image pattern
+      const b64Match = content.match(/data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)/);
+      if (b64Match) {
+        mimeType = b64Match[1];
+        imageBase64 = b64Match[2];
+      }
+    } else if (Array.isArray(content)) {
+      const imgPart = content.find((p: any) => p.type === "image_url" || (p.type === "image" && p.source?.data));
+      if (imgPart?.source?.data) {
+        imageBase64 = imgPart.source.data;
+        mimeType = imgPart.source?.media_type || "image/png";
+      } else if (imgPart?.image_url?.url) {
+        const urlMatch = imgPart.image_url.url.match(/data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)/);
+        if (urlMatch) {
+          mimeType = urlMatch[1];
+          imageBase64 = urlMatch[2];
+        }
+      }
+    }
+
+    // Also check for inline_data format (Gemini native)
+    if (!imageBase64) {
+      const parts = result.candidates?.[0]?.content?.parts || [];
+      const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
+      if (imagePart) {
+        imageBase64 = imagePart.inlineData.data;
+        mimeType = imagePart.inlineData.mimeType;
+      }
+    }
+
+    if (!imageBase64) throw new Error("No image generated");
+
+    const imageBytes = base64Decode(imageBase64);
     const fileName = `${projectId}/thumbnail.png`;
 
-    await supabase.storage.from("segment-images").upload(fileName, imageBytes, { upsert: true, contentType: "image/png" });
+    await supabase.storage.from("segment-images").upload(fileName, imageBytes, { upsert: true, contentType: mimeType });
     const { data: urlData } = supabase.storage.from("segment-images").getPublicUrl(fileName);
     const thumbnailUrl = urlData.publicUrl;
 
