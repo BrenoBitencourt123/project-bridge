@@ -32,7 +32,22 @@ export function findSubSceneCutPoints(
     }
   }
 
-  return cutPoints;
+  // Enforce minimum 5s gap between cuts — merge if too close
+  const MIN_GAP_SECONDS = 5;
+  const filtered: number[] = [cutPoints[0]];
+  for (let i = 1; i < cutPoints.length; i++) {
+    if (cutPoints[i] - filtered[filtered.length - 1] >= MIN_GAP_SECONDS) {
+      filtered.push(cutPoints[i]);
+    }
+    // else: skip this cut point (merge sub-scenes)
+  }
+
+  // Also ensure first cut is at least 5s from start
+  if (filtered.length > 0 && filtered[0] < MIN_GAP_SECONDS) {
+    filtered.shift();
+  }
+
+  return filtered;
 }
 
 /** @deprecated Use findSubSceneCutPoints instead */

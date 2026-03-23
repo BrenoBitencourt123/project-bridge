@@ -22,10 +22,11 @@ export function splitIntoSubScenes(
   const words = narration.trim().split(/\s+/);
   const wordCount = words.length;
 
+  // Increased thresholds to avoid very short sub-scenes
   let numSubScenes: number;
-  if (wordCount < 25) numSubScenes = 1;
-  else if (wordCount < 50) numSubScenes = 2;
-  else if (wordCount < 75) numSubScenes = 3;
+  if (wordCount < 30) numSubScenes = 1;
+  else if (wordCount < 55) numSubScenes = 2;
+  else if (wordCount < 80) numSubScenes = 3;
   else numSubScenes = 4;
 
   // Split narration into sentences, then distribute among sub-scenes
@@ -52,6 +53,25 @@ export function splitIntoSubScenes(
       image_prompt: prompt,
     });
   }
+
+  // Merge sub-scenes that are too short (< 15 words ≈ < 6s of narration)
+  const MIN_WORDS = 15;
+  for (let i = subScenes.length - 1; i > 0; i--) {
+    const sceneWords = subScenes[i].narration_segment.trim().split(/\s+/).length;
+    if (sceneWords < MIN_WORDS) {
+      // Merge into previous sub-scene
+      subScenes[i - 1].narration_segment += ' ' + subScenes[i].narration_segment;
+      subScenes.splice(i, 1);
+    }
+  }
+
+  // Re-index after merging
+  subScenes.forEach((s, idx) => {
+    s.sub_index = idx + 1;
+    if (baseImagePrompt) {
+      s.image_prompt = `${baseImagePrompt} — ${PERSPECTIVE_HINTS[idx] || PERSPECTIVE_HINTS[0]}`;
+    }
+  });
 
   // Ensure at least 1 sub-scene
   if (subScenes.length === 0) {
