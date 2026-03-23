@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
@@ -15,8 +14,8 @@ serve(async (req) => {
     const { imagePrompt, projectId, segmentId, sequenceNumber, subIndex, momentType } = await req.json();
     if (!imagePrompt || !projectId) throw new Error("imagePrompt and projectId required");
 
-    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
-    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY not configured");
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -34,32 +33,42 @@ NEVER include brand names, channel names, or logos.
 Scene: ${imagePrompt}`;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${GOOGLE_AI_API_KEY}`,
+      "https://ai.gateway.lovable.dev/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: fullPrompt }] }],
-          generationConfig: {
-            responseModalities: ["IMAGE", "TEXT"],
-            temperature: 0.4,
-          },
+          model: "google/gemini-3-pro-image-preview",
+          messages: [{ role: "user", content: fullPrompt }],
+          modalities: ["image", "text"],
         }),
       }
     );
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`Gemini Image API error [${response.status}]: ${errText}`);
+      if (response.status === 429) {
+        throw new Error("Rate limited — please try again in a moment");
+      }
+      if (response.status === 402) {
+        throw new Error("AI credits exhausted — please add funds in Settings > Workspace > Usage");
+      }
+      throw new Error(`AI Gateway error [${response.status}]: ${errText}`);
     }
 
     const result = await response.json();
-    const parts = result.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
+    const images = result.choices?.[0]?.message?.images;
+    if (!images || images.length === 0) throw new Error("No image generated");
 
-    if (!imagePart) throw new Error("No image generated");
+    const imageDataUrl = images[0].image_url.url;
+    // Extract base64 data from data URL
+    const base64Data = imageDataUrl.split(",")[1];
+    if (!base64Data) throw new Error("Invalid image data received");
 
-    const imageBytes = base64Decode(imagePart.inlineData.data);
+    const imageBytes = base64Decode(base64Data);
     const num = String(sequenceNumber).padStart(3, "0");
     const subSuffix = subIndex ? `-sub-${subIndex}` : "";
     const fileName = `${projectId}/segment-${num}${subSuffix}.png`;
