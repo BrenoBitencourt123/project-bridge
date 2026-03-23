@@ -55,7 +55,8 @@ serve(async (req) => {
 
     const imageBytes = base64Decode(imagePart.inlineData.data);
     const num = String(sequenceNumber).padStart(3, "0");
-    const fileName = `${projectId}/segment-${num}.png`;
+    const subSuffix = subIndex ? `-sub-${subIndex}` : "";
+    const fileName = `${projectId}/segment-${num}${subSuffix}.png`;
 
     const { error: uploadErr } = await supabase.storage
       .from("segment-images")
