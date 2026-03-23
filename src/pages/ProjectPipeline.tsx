@@ -71,9 +71,11 @@ export default function ProjectPipeline() {
     }
   }, [project]);
 
+  const [isGenerating, setIsGenerating] = useState(false);
+
   useEffect(() => {
-    if (segments.length > 0) setLocalSegments(segments);
-  }, [segments]);
+    if (segments.length > 0 && !isGenerating) setLocalSegments(segments);
+  }, [segments, isGenerating]);
 
   const handleTitleSave = async () => {
     if (!localProject || !titleDraft.trim()) return;
