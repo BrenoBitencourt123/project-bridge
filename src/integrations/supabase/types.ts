@@ -14,7 +14,137 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+          voice_settings: Json | null
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+          voice_settings?: Json | null
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+          voice_settings?: Json | null
+        }
+        Relationships: []
+      }
+      projects: {
+        Row: {
+          created_at: string
+          difficulty_level: string | null
+          id: string
+          raw_script: string | null
+          status: Database["public"]["Enums"]["project_status"]
+          subject: string | null
+          target_duration: number | null
+          thumbnail_url: string | null
+          title: string
+          topic: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          difficulty_level?: string | null
+          id?: string
+          raw_script?: string | null
+          status?: Database["public"]["Enums"]["project_status"]
+          subject?: string | null
+          target_duration?: number | null
+          thumbnail_url?: string | null
+          title: string
+          topic?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          difficulty_level?: string | null
+          id?: string
+          raw_script?: string | null
+          status?: Database["public"]["Enums"]["project_status"]
+          subject?: string | null
+          target_duration?: number | null
+          thumbnail_url?: string | null
+          title?: string
+          topic?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      segments: {
+        Row: {
+          audio_status: Database["public"]["Enums"]["media_status"]
+          audio_url: string | null
+          created_at: string
+          duration_estimate: number | null
+          id: string
+          image_prompt: string | null
+          image_status: Database["public"]["Enums"]["media_status"]
+          image_url: string | null
+          moment_type: Database["public"]["Enums"]["moment_type"] | null
+          narration: string
+          project_id: string
+          sequence_number: number
+          symbolism: string | null
+          updated_at: string
+        }
+        Insert: {
+          audio_status?: Database["public"]["Enums"]["media_status"]
+          audio_url?: string | null
+          created_at?: string
+          duration_estimate?: number | null
+          id?: string
+          image_prompt?: string | null
+          image_status?: Database["public"]["Enums"]["media_status"]
+          image_url?: string | null
+          moment_type?: Database["public"]["Enums"]["moment_type"] | null
+          narration: string
+          project_id: string
+          sequence_number: number
+          symbolism?: string | null
+          updated_at?: string
+        }
+        Update: {
+          audio_status?: Database["public"]["Enums"]["media_status"]
+          audio_url?: string | null
+          created_at?: string
+          duration_estimate?: number | null
+          id?: string
+          image_prompt?: string | null
+          image_status?: Database["public"]["Enums"]["media_status"]
+          image_url?: string | null
+          moment_type?: Database["public"]["Enums"]["moment_type"] | null
+          narration?: string
+          project_id?: string
+          sequence_number?: number
+          symbolism?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "segments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +153,15 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      media_status: "idle" | "generating" | "done" | "error"
+      moment_type: "hook" | "concept" | "example" | "list_summary" | "cta"
+      project_status:
+        | "draft"
+        | "scripted"
+        | "segmented"
+        | "images_done"
+        | "audio_done"
+        | "complete"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +288,17 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      media_status: ["idle", "generating", "done", "error"],
+      moment_type: ["hook", "concept", "example", "list_summary", "cta"],
+      project_status: [
+        "draft",
+        "scripted",
+        "segmented",
+        "images_done",
+        "audio_done",
+        "complete",
+      ],
+    },
   },
 } as const
