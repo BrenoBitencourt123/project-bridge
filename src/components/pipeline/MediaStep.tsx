@@ -123,6 +123,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     await supabase.from('projects').update({ status: 'images_done', updated_at: new Date().toISOString() }).eq('id', project.id);
     onUpdate({ status: 'images_done' });
     setGeneratingImages(false);
+    onGeneratingChange?.(false);
   };
 
   const flattenSubScenes = (): { subScene: SubScene; segment: Segment; flatIndex: number }[] => {
