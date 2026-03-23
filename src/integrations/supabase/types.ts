@@ -145,6 +145,50 @@ export type Database = {
           },
         ]
       }
+      sub_scenes: {
+        Row: {
+          created_at: string
+          id: string
+          image_prompt: string | null
+          image_status: Database["public"]["Enums"]["media_status"]
+          image_url: string | null
+          narration_segment: string
+          segment_id: string
+          sub_index: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          image_prompt?: string | null
+          image_status?: Database["public"]["Enums"]["media_status"]
+          image_url?: string | null
+          narration_segment: string
+          segment_id: string
+          sub_index: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          image_prompt?: string | null
+          image_status?: Database["public"]["Enums"]["media_status"]
+          image_url?: string | null
+          narration_segment?: string
+          segment_id?: string
+          sub_index?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sub_scenes_segment_id_fkey"
+            columns: ["segment_id"]
+            isOneToOne: false
+            referencedRelation: "segments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
