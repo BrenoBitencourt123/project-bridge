@@ -17,9 +17,10 @@ interface MediaStepProps {
   onSegmentsChange: (segments: Segment[]) => void;
   onUpdate: (updates: Partial<Project>) => void;
   onNext: () => void;
+  onGeneratingChange?: (generating: boolean) => void;
 }
 
-export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext }: MediaStepProps) {
+export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange }: MediaStepProps) {
   const { toast } = useToast();
   const [generatingImages, setGeneratingImages] = useState(false);
   const [generatingAudios, setGeneratingAudios] = useState(false);
