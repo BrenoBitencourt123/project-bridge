@@ -189,6 +189,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       toast({ title: 'Erro ao gerar áudios', description: err.message, variant: 'destructive' });
     } finally {
       setGeneratingAudios(false);
+      onGeneratingChange?.(false);
       setStatusText('');
     }
   };
