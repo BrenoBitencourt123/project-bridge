@@ -37,6 +37,8 @@ export interface SubScene {
   image_prompt: string | null;
   image_url: string | null;
   image_status: MediaStatus;
+  audio_url: string | null;
+  audio_status: MediaStatus;
 }
 
 export interface Segment {
