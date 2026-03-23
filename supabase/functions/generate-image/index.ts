@@ -12,7 +12,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { imagePrompt, projectId, segmentId, sequenceNumber, momentType } = await req.json();
+    const { imagePrompt, projectId, segmentId, sequenceNumber, subIndex, momentType } = await req.json();
     if (!imagePrompt || !projectId) throw new Error("imagePrompt and projectId required");
 
     const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
@@ -55,7 +55,8 @@ serve(async (req) => {
 
     const imageBytes = base64Decode(imagePart.inlineData.data);
     const num = String(sequenceNumber).padStart(3, "0");
-    const fileName = `${projectId}/segment-${num}.png`;
+    const subSuffix = subIndex ? `-sub-${subIndex}` : "";
+    const fileName = `${projectId}/segment-${num}${subSuffix}.png`;
 
     const { error: uploadErr } = await supabase.storage
       .from("segment-images")

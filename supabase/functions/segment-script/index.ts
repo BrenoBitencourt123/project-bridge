@@ -15,17 +15,18 @@ serve(async (req) => {
     const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
     if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY not configured");
 
-    const prompt = `Você é um segmentador de roteiros para vídeos educacionais. Divida o roteiro abaixo em segmentos visuais.
+    const prompt = `Você é um segmentador de roteiros para vídeos educacionais. Divida o roteiro abaixo em BLOCOS de narração.
 
 REGRAS:
-- Cada segmento deve ter entre 8 e 25 palavras de narração
-- Gere entre 70 e 95 segmentos para um roteiro de 10 minutos
+- Cada bloco deve ter entre 30 e 90 palavras de narração
+- Gere entre 40 e 60 blocos para um roteiro de 10 minutos
 - O campo "narration" deve ser um trecho EXATO do roteiro original, sem modificar palavras
 - O campo "imagePrompt" deve descrever uma imagem literal e concreta para ilustrar o que é narrado
 - NÃO use metáforas abstratas nas imagens — ilustre literalmente o que o narrador fala
 - Se houver fórmulas matemáticas na narração, inclua-as no imagePrompt
 - O campo "symbolism" deve explicar brevemente o que a imagem representa
 - O campo "momentType" deve ser um de: hook, concept, example, list_summary, cta
+- Cada bloco deve ser um trecho coeso e contínuo do roteiro, mantendo frases completas
 
 ROTEIRO:
 ${script}

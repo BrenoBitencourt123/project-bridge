@@ -29,6 +29,16 @@ export interface Project {
   updated_at: string;
 }
 
+export interface SubScene {
+  id: string;
+  segment_id: string;
+  sub_index: number;
+  narration_segment: string;
+  image_prompt: string | null;
+  image_url: string | null;
+  image_status: MediaStatus;
+}
+
 export interface Segment {
   id: string;
   project_id: string;
@@ -42,6 +52,7 @@ export interface Segment {
   audio_url: string | null;
   image_status: MediaStatus;
   audio_status: MediaStatus;
+  sub_scenes?: SubScene[];
 }
 
 export interface Profile {
