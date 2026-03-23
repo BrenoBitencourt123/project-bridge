@@ -8,6 +8,7 @@ import { SegmentCard } from './SegmentCard';
 import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
 import { findSubSceneCutPoints } from '@/lib/find-cut-points';
+import { AudioImportDialog } from './AudioImportDialog';
 import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
@@ -20,11 +21,11 @@ interface MediaStepProps {
 
 export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext }: MediaStepProps) {
   const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [generatingImages, setGeneratingImages] = useState(false);
   const [generatingAudios, setGeneratingAudios] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [imageProgress, setImageProgress] = useState(0);
   const [audioProgress, setAudioProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
@@ -188,23 +189,22 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     }
   };
 
-  const handleUploadAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleUploadAudio = async (orderedFiles: File[]) => {
+    if (orderedFiles.length === 0) return;
     setUploadingAudio(true);
     setStatusText('Transcrevendo áudio...');
     try {
       const alignments: Alignment[] = [];
       const audioBuffers: ArrayBuffer[] = [];
 
-      for (let i = 0; i < files.length; i++) {
-        setStatusText(`Transcrevendo parte ${i + 1} de ${files.length}...`);
+      for (let i = 0; i < orderedFiles.length; i++) {
+        setStatusText(`Transcrevendo parte ${i + 1} de ${orderedFiles.length}...`);
         const formData = new FormData();
-        formData.append('audio', files[i]);
+        formData.append('audio', orderedFiles[i]);
         const { data, error } = await supabase.functions.invoke('transcribe-audio', { body: formData });
         if (error) throw error;
         alignments.push(data.alignment);
-        audioBuffers.push(await files[i].arrayBuffer());
+        audioBuffers.push(await orderedFiles[i].arrayBuffer());
       }
 
       setStatusText('Processando alinhamento...');
@@ -233,7 +233,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     } finally {
       setUploadingAudio(false);
       setStatusText('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -285,11 +284,15 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             {generatingAudios ? <Loader2 className="animate-spin h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
             Gerar Todos Áudios
           </Button>
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingAudio}>
+          <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)} disabled={uploadingAudio}>
             {uploadingAudio ? <Loader2 className="animate-spin h-3 w-3" /> : <Upload className="h-3 w-3" />}
             Enviar Áudio
           </Button>
-          <input ref={fileInputRef} type="file" multiple accept=".mp3,.wav,.m4a" className="hidden" onChange={handleUploadAudio} />
+          <AudioImportDialog
+            open={showImportDialog}
+            onOpenChange={setShowImportDialog}
+            onConfirm={handleUploadAudio}
+          />
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
