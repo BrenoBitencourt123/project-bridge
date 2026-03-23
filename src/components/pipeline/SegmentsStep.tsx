@@ -44,9 +44,11 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
         audio_status: 'idle',
       }));
 
+      const validSegments = newSegments.filter((s: any) => s.narration && s.narration.trim() !== "");
+
       const { data: inserted, error: insertErr } = await supabase
         .from('segments')
-        .insert(newSegments)
+        .insert(validSegments)
         .select();
       if (insertErr) throw insertErr;
 
