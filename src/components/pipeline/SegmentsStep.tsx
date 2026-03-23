@@ -28,23 +28,29 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
       });
       if (error) throw error;
 
+      const validMomentTypes = new Set(['hook', 'concept', 'example', 'list_summary', 'cta']);
+
       // Delete existing segments
       await supabase.from('segments').delete().eq('project_id', project.id);
 
       // Insert new segments
-      const newSegments = data.segments.map((s: any, i: number) => ({
-        project_id: project.id,
-        sequence_number: i + 1,
-        narration: s.narration,
-        image_prompt: s.imagePrompt || s.image_prompt || null,
-        symbolism: s.symbolism || null,
-        moment_type: s.momentType || s.moment_type || null,
-        duration_estimate: s.narration ? s.narration.split(/\s+/).length / 3.67 : null,
-        image_status: 'idle',
-        audio_status: 'idle',
-      }));
+      const newSegments = data.segments.map((s: any, i: number) => {
+        const rawMomentType = s.momentType || s.moment_type || null;
 
-      const validSegments = newSegments.filter((s: any) => s.narration && s.narration.trim() !== "");
+        return {
+          project_id: project.id,
+          sequence_number: i + 1,
+          narration: s.narration,
+          image_prompt: s.imagePrompt || s.image_prompt || null,
+          symbolism: s.symbolism || null,
+          moment_type: validMomentTypes.has(rawMomentType) ? rawMomentType : null,
+          duration_estimate: s.narration ? s.narration.split(/\s+/).length / 3.67 : null,
+          image_status: 'idle',
+          audio_status: 'idle',
+        };
+      });
+
+      const validSegments = newSegments.filter((s: any) => s.narration && s.narration.trim() !== '');
 
       const { data: inserted, error: insertErr } = await supabase
         .from('segments')
