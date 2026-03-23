@@ -23,10 +23,18 @@ serve(async (req) => {
     );
 
     const prompt = `ABSOLUTE REQUIREMENT: 16:9 (1920x1080) widescreen.
-Hand-drawn sketch style thumbnail on beige/cream paper background. Pencil line drawing with blue (#4A90E2) accents.
-CRITICAL LANGUAGE RULE: ALL visible text MUST be in PT-BR. NEVER English.
-Educational video thumbnail for: "${projectTitle}". ${userPrompt || ""}.
-Wide format, visually compelling, suitable for YouTube thumbnail.`;
+CRITICAL LANGUAGE RULE: ALL visible text MUST be in PT-BR. NEVER English. Double-check spelling of every Portuguese word.
+
+BACKGROUND: Dark blue (#1a3a5c) background FILLED with hand-drawn mathematical formulas, graphs, geometric shapes, arrows, question marks, light bulbs, and scientific symbols — like a chalkboard covered in doodles. These should be drawn in lighter blue (#4A90E2) outlines.
+
+FOREGROUND: Two side-by-side panels on beige/cream paper, showing a "before and after" or "problem vs solution" concept related to the topic. Use cartoon-style characters with expressive faces. Left panel shows confusion/difficulty, right panel shows understanding/success.
+
+TOP: Bold, large, impactful title text in PT-BR related to the topic. Use a casual, engaging YouTube thumbnail style — like a question or provocative statement. Maximum 5-6 words.
+
+Style: Hand-drawn sketch, pencil lines, educational cartoon. Colors: dark blue background, beige panels, blue (#4A90E2) accents, black outlines.
+NEVER include brand names, channel names, or logos.
+
+Topic: "${projectTitle}". ${userPrompt || ""}`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
