@@ -23,9 +23,15 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const styleGuide = `Hand-drawn sketch style on beige/cream paper background. Pencil line drawing with slight roughness. Use blue (#4A90E2) as the ONLY accent color for highlights and emphasis. Educational illustration style. Clean and clear composition.`;
+    const fullPrompt = `ABSOLUTE REQUIREMENT: Aspect ratio 16:9 (1920x1080 widescreen).
+CRITICAL LANGUAGE RULE: ALL visible text in the image MUST be in Brazilian Portuguese (PT-BR). NEVER use English text.
+ANTI-NARRATION TEXT RULE: NEVER transcribe full narration sentences into the image. Maximum 1-4 visible words (titles, labels, numeric values only).
+ACRONYM RULE: Use correct abbreviated form of acronyms, never spell them phonetically.
+COMPOSITION RULE: Main element centered occupying 60-70% of the frame. Supporting context at the edges.
+STYLE: Hand-drawn sketch on beige/cream paper background. Pencil cross-hatching with slight roughness. Grayscale tones with ONLY blue (#4A90E2) as accent color for highlights and emphasis. Educational illustration style.
+NEVER include brand names, channel names, or logos.
 
-    const fullPrompt = `${styleGuide}\n\nIllustration: ${imagePrompt}`;
+Scene: ${imagePrompt}`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GOOGLE_AI_API_KEY}`,

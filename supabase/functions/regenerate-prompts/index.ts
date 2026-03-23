@@ -22,9 +22,13 @@ serve(async (req) => {
     const prompt = `Para cada segmento de narração abaixo, gere um prompt de imagem (imagePrompt) e um campo de simbolismo (symbolism).
 
 REGRAS:
+- imagePrompt DEVE ser escrito em português brasileiro (PT-BR)
+- Se a imagem tiver textos visíveis (rótulos, placas, fórmulas), eles DEVEM estar em PT-BR, NUNCA em inglês
 - imagePrompt: descreva uma imagem literal e concreta, estilo esboço à mão em papel bege
 - NÃO use metáforas abstratas — ilustre literalmente o que o narrador fala
 - Se houver fórmulas matemáticas, inclua-as no prompt
+- NUNCA inclua nomes de marca, canal ou logos
+- Texto visível na imagem: máximo 1-4 palavras (títulos, rótulos, valores numéricos)
 - symbolism: breve explicação do que a imagem representa
 
 SEGMENTOS:
