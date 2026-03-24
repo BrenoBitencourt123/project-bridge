@@ -9,6 +9,8 @@ import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import ProjectPipeline from "./pages/ProjectPipeline";
 import VoiceSettings from "./pages/VoiceSettings";
+import AnalyticsPage from "./pages/AnalyticsPage";
+import AssetsPage from "./pages/AssetsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -20,6 +22,8 @@ function AppRoutes() {
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/project/:id" element={<ProtectedRoute><ProjectPipeline /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><VoiceSettings /></ProtectedRoute>} />
+      <Route path="/analytics" element={<ProtectedRoute><AnalyticsPage /></ProtectedRoute>} />
+      <Route path="/assets" element={<ProtectedRoute><AssetsPage /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

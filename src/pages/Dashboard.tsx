@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Zap, Settings, LogOut, Plus, ImageIcon, Sparkles, Loader2 } from 'lucide-react';
+import { Zap, Settings, LogOut, Plus, ImageIcon, Sparkles, Loader2, Trash2, BarChart3, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -57,6 +58,26 @@ export default function Dashboard() {
       navigate(`/project/${data.id}`);
     },
     onError: (err: any) => toast({ title: 'Erro ao criar projeto', description: err.message, variant: 'destructive' }),
+  });
+
+  const deleteProject = useMutation({
+    mutationFn: async (projectId: string) => {
+      // Clean storage files
+      const buckets = ['segment-images', 'segment-audio'];
+      for (const bucket of buckets) {
+        const { data: files } = await supabase.storage.from(bucket).list(projectId);
+        if (files && files.length > 0) {
+          await supabase.storage.from(bucket).remove(files.map(f => `${projectId}/${f.name}`));
+        }
+      }
+      const { error } = await supabase.from('projects').delete().eq('id', projectId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      toast({ title: 'Projeto excluído' });
+    },
+    onError: (err: any) => toast({ title: 'Erro', description: err.message, variant: 'destructive' }),
   });
 
   const handlePasteCreate = () => {
@@ -115,6 +136,12 @@ export default function Dashboard() {
             <span className="text-lg font-bold">Atlas Studio</span>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/assets')} className="gap-1">
+              <Package className="h-4 w-4" /> Assets
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/analytics')} className="gap-1">
+              <BarChart3 className="h-4 w-4" /> Analytics
+            </Button>
             <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
               <Settings className="h-5 w-5" />
             </Button>
@@ -196,9 +223,30 @@ export default function Dashboard() {
                     </p>
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>{new Date(project.updated_at).toLocaleDateString('pt-BR')} · {project.target_duration || 10}min</span>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs opacity-0 group-hover:opacity-100" onClick={e => { e.stopPropagation(); setThumbnailDialog({ open: true, project }); }}>
-                        <Sparkles className="h-3 w-3" /> Thumbnail
-                      </Button>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={e => { e.stopPropagation(); setThumbnailDialog({ open: true, project }); }}>
+                          <Sparkles className="h-3 w-3" /> Thumb
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={e => e.stopPropagation()}>
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent onClick={e => e.stopPropagation()}>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Excluir projeto?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                "{project.title}" e todos os seus dados (segmentos, imagens, áudios) serão removidos permanentemente.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => deleteProject.mutate(project.id)}>Excluir</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
