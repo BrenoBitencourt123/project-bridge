@@ -1,10 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { Project, Segment, SubScene } from '@/types/atlas';
 import { SegmentCard } from './SegmentCard';
+import { StyleTemplateSelector } from './StyleTemplateSelector';
 import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
 import { findSubSceneCutPoints } from '@/lib/find-cut-points';
@@ -31,6 +32,8 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [audioProgress, setAudioProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
   const [genSubSceneId, setGenSubSceneId] = useState<string | null>(null);
+  const [styleTemplateId, setStyleTemplateId] = useState<string | null>(null);
+  const [stylePrefix, setStylePrefix] = useState<string>('');
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
@@ -38,6 +41,45 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const totalSubScenes = allSubScenes.length;
 
   const allDone = subScenesDone === totalSubScenes && subAudiosDone === totalSubScenes && totalSubScenes > 0;
+
+  // Realtime subscription for sub_scenes progress
+  useEffect(() => {
+    const segmentIds = segments.map(s => s.id);
+    if (segmentIds.length === 0) return;
+
+    const channel = supabase
+      .channel(`sub-scenes-progress-${project.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'sub_scenes',
+        },
+        (payload) => {
+          const updated = payload.new as SubScene;
+          // Only process if it belongs to our segments
+          if (!segmentIds.includes(updated.segment_id)) return;
+          
+          onSegmentsChange(
+            segments.map(seg => {
+              if (seg.id !== updated.segment_id) return seg;
+              return {
+                ...seg,
+                sub_scenes: (seg.sub_scenes || []).map(sc =>
+                  sc.id === updated.id ? { ...sc, ...updated } : sc
+                ),
+              };
+            })
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [project.id, segments.map(s => s.id).join(',')]);
 
   const updateSegment = (index: number, updates: Partial<Segment>) => {
     const updated = [...segments];
@@ -106,6 +148,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
               sequenceNumber: seg.sequence_number,
               subIndex: sc.sub_index,
               momentType: seg.moment_type,
+              stylePrefix,
             },
           });
           if (error) throw error;
@@ -259,6 +302,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           sequenceNumber: seg.sequence_number,
           subIndex: sc.sub_index,
           momentType: seg.moment_type,
+          stylePrefix,
         },
       });
       if (error) throw error;
@@ -275,7 +319,13 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     <div className="space-y-4">
       {/* HUD */}
       <div className="sticky top-14 z-40 rounded-lg border bg-card p-4 space-y-3">
-        <h3 className="font-semibold">Geração de Mídia</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">Geração de Mídia</h3>
+          <StyleTemplateSelector
+            value={styleTemplateId}
+            onChange={(id, prefix) => { setStyleTemplateId(id); setStylePrefix(prefix); }}
+          />
+        </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={handleRegeneratePrompts} disabled={regenerating}>
             {regenerating ? <Loader2 className="animate-spin h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}

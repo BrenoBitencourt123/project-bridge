@@ -7,11 +7,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const DEFAULT_STYLE = `STYLE: Hand-drawn sketch on beige/cream paper background. Pencil cross-hatching with slight roughness. Grayscale tones with ONLY blue (#4A90E2) as accent color for highlights and emphasis. Educational illustration style.`;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { imagePrompt, projectId, segmentId, sequenceNumber, subIndex, momentType } = await req.json();
+    const { imagePrompt, projectId, segmentId, sequenceNumber, subIndex, momentType, stylePrefix } = await req.json();
     if (!imagePrompt || !projectId) throw new Error("imagePrompt and projectId required");
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -22,12 +24,14 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    const activeStyle = stylePrefix || DEFAULT_STYLE;
+
     const fullPrompt = `ABSOLUTE REQUIREMENT: Aspect ratio 16:9 (1920x1080 widescreen).
 CRITICAL LANGUAGE RULE: ALL visible text in the image MUST be in Brazilian Portuguese (PT-BR). NEVER use English text.
 ANTI-NARRATION TEXT RULE: NEVER transcribe full narration sentences into the image. Maximum 1-4 visible words (titles, labels, numeric values only).
 ACRONYM RULE: Use correct abbreviated form of acronyms, never spell them phonetically.
 COMPOSITION RULE: Main element centered occupying 60-70% of the frame. Supporting context at the edges.
-STYLE: Hand-drawn sketch on beige/cream paper background. Pencil cross-hatching with slight roughness. Grayscale tones with ONLY blue (#4A90E2) as accent color for highlights and emphasis. Educational illustration style.
+${activeStyle}
 NEVER include brand names, channel names, or logos.
 
 Scene: ${imagePrompt}`;
@@ -64,7 +68,6 @@ Scene: ${imagePrompt}`;
     if (!images || images.length === 0) throw new Error("No image generated");
 
     const imageDataUrl = images[0].image_url.url;
-    // Extract base64 data from data URL
     const base64Data = imageDataUrl.split(",")[1];
     if (!base64Data) throw new Error("Invalid image data received");
 
@@ -80,7 +83,7 @@ Scene: ${imagePrompt}`;
 
     const { data: urlData } = supabase.storage.from("segment-images").getPublicUrl(fileName);
 
-    return new Response(JSON.stringify({ imageUrl: urlData.publicUrl }), {
+    return new Response(JSON.stringify({ imageUrl: urlData.publicUrl + `?t=${Date.now()}` }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
