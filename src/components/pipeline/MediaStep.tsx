@@ -35,6 +35,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [styleTemplateId, setStyleTemplateId] = useState<string | null>(null);
   const [stylePrefix, setStylePrefix] = useState<string>('');
 
+  const segmentsRef = useRef(segments);
+  segmentsRef.current = segments;
+
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
   const subAudiosDone = allSubScenes.filter(sc => sc.audio_status === 'done').length;
@@ -58,11 +61,12 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         },
         (payload) => {
           const updated = payload.new as SubScene;
-          // Only process if it belongs to our segments
           if (!segmentIds.includes(updated.segment_id)) return;
           
+          // Use ref to always get latest segments
+          const currentSegments = segmentsRef.current;
           onSegmentsChange(
-            segments.map(seg => {
+            currentSegments.map(seg => {
               if (seg.id !== updated.segment_id) return seg;
               return {
                 ...seg,
