@@ -103,9 +103,6 @@ Scene: ${imagePrompt}`;
       throw new Error("No image generated");
     }
 
-    const imageDataUrl = images[0].image_url.url;
-    const base64Data = imageDataUrl.split(",")[1];
-    if (!base64Data) throw new Error("Invalid image data received");
 
     const imageBytes = base64Decode(base64Data);
     const num = String(sequenceNumber).padStart(3, "0");
