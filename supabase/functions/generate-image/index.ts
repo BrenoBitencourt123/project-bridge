@@ -74,12 +74,35 @@ Scene: ${imagePrompt}`;
     }
 
     const result = await response.json();
-    const images = result.choices?.[0]?.message?.images;
-    if (!images || images.length === 0) throw new Error("No image generated");
+    console.log("AI Gateway response keys:", JSON.stringify(Object.keys(result)));
+    console.log("choices[0].message keys:", JSON.stringify(Object.keys(result?.choices?.[0]?.message || {})));
+    
+    // Try multiple response formats
+    const message = result.choices?.[0]?.message;
+    const images = message?.images;
+    
+    // Some models return image in content parts
+    let base64Data: string | undefined;
+    
+    if (images && images.length > 0) {
+      const imageDataUrl = images[0].image_url?.url || images[0];
+      base64Data = typeof imageDataUrl === 'string' && imageDataUrl.includes(',') 
+        ? imageDataUrl.split(",")[1] 
+        : imageDataUrl;
+    } else if (message?.content && Array.isArray(message.content)) {
+      // Handle multimodal content array format
+      const imagePart = message.content.find((p: any) => p.type === 'image_url' || p.type === 'image');
+      if (imagePart) {
+        const url = imagePart.image_url?.url || imagePart.url;
+        base64Data = url?.includes(',') ? url.split(",")[1] : url;
+      }
+    }
+    
+    if (!base64Data) {
+      console.error("Full AI response:", JSON.stringify(result).slice(0, 2000));
+      throw new Error("No image generated");
+    }
 
-    const imageDataUrl = images[0].image_url.url;
-    const base64Data = imageDataUrl.split(",")[1];
-    if (!base64Data) throw new Error("Invalid image data received");
 
     const imageBytes = base64Decode(base64Data);
     const num = String(sequenceNumber).padStart(3, "0");
