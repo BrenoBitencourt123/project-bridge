@@ -15,7 +15,7 @@ import type { Alignment } from '@/types/atlas';
 interface MediaStepProps {
   project: Project;
   segments: Segment[];
-  onSegmentsChange: (segments: Segment[]) => void;
+  onSegmentsChange: (segments: Segment[] | ((prev: Segment[]) => Segment[])) => void;
   onUpdate: (updates: Partial<Project>) => void;
   onNext: () => void;
   onGeneratingChange?: (generating: boolean) => void;
