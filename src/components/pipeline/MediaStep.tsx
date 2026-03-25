@@ -310,7 +310,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           stylePrefix,
           assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
         },
-        },
       });
       if (error) throw error;
       updateSubSceneInSegments(seg.id, subSceneId, { image_url: data.imageUrl, image_status: 'done' });
