@@ -35,9 +35,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [styleTemplateId, setStyleTemplateId] = useState<string | null>(null);
   const [stylePrefix, setStylePrefix] = useState<string>('');
 
-  const segmentsRef = useRef(segments);
-  segmentsRef.current = segments;
-
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
   const subAudiosDone = allSubScenes.filter(sc => sc.audio_status === 'done').length;
@@ -63,10 +60,8 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           const updated = payload.new as SubScene;
           if (!segmentIds.includes(updated.segment_id)) return;
           
-          // Use ref to always get latest segments
-          const currentSegments = segmentsRef.current;
-          onSegmentsChange(
-            currentSegments.map(seg => {
+          onSegmentsChange(prev =>
+            prev.map(seg => {
               if (seg.id !== updated.segment_id) return seg;
               return {
                 ...seg,
@@ -86,23 +81,25 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   }, [project.id, segments.map(s => s.id).join(',')]);
 
   const updateSegment = (index: number, updates: Partial<Segment>) => {
-    const updated = [...segments];
-    updated[index] = { ...updated[index], ...updates };
-    onSegmentsChange(updated);
+    onSegmentsChange(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], ...updates };
+      return updated;
+    });
   };
 
   const updateSubSceneInSegments = useCallback((segmentId: string, subSceneId: string, updates: Partial<SubScene>) => {
-    const current = segmentsRef.current;
-    const updated = current.map(seg => {
-      if (seg.id !== segmentId) return seg;
-      return {
-        ...seg,
-        sub_scenes: (seg.sub_scenes || []).map(sc =>
-          sc.id === subSceneId ? { ...sc, ...updates } : sc
-        ),
-      };
-    });
-    onSegmentsChange(updated);
+    onSegmentsChange(prev =>
+      prev.map(seg => {
+        if (seg.id !== segmentId) return seg;
+        return {
+          ...seg,
+          sub_scenes: (seg.sub_scenes || []).map(sc =>
+            sc.id === subSceneId ? { ...sc, ...updates } : sc
+          ),
+        };
+      })
+    );
   }, [onSegmentsChange]);
 
   const handleRegeneratePrompts = async () => {
