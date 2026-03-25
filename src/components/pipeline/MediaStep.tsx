@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
 import { findSubSceneCutPoints } from '@/lib/find-cut-points';
 import { AudioImportDialog } from './AudioImportDialog';
+import { AssetReferenceSelector, type AssetReference } from './AssetReferenceSelector';
 import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
