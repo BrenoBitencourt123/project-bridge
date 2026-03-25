@@ -91,8 +91,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     onSegmentsChange(updated);
   };
 
-  const updateSubSceneInSegments = (segmentId: string, subSceneId: string, updates: Partial<SubScene>) => {
-    const updated = segments.map(seg => {
+  const updateSubSceneInSegments = useCallback((segmentId: string, subSceneId: string, updates: Partial<SubScene>) => {
+    const current = segmentsRef.current;
+    const updated = current.map(seg => {
       if (seg.id !== segmentId) return seg;
       return {
         ...seg,
@@ -102,7 +103,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       };
     });
     onSegmentsChange(updated);
-  };
+  }, [onSegmentsChange]);
 
   const handleRegeneratePrompts = async () => {
     setRegenerating(true);
