@@ -1,6 +1,5 @@
 /**
- * Splits a segment's narration into 1-4 sub-scenes based on word count.
- * Each sub-scene gets a portion of the narration and a variation of the image prompt.
+ * Splits a segment's narration into sub-scenes of 10-20 words each (~4-8 seconds).
  */
 export interface SubSceneInput {
   sub_index: number;
@@ -13,7 +12,15 @@ const PERSPECTIVE_HINTS = [
   'close-up detalhado, ângulo diferente',
   'visão panorâmica, contexto amplo',
   'perspectiva criativa, ângulo alternativo',
+  'vista lateral, composição dinâmica',
+  'plano médio, destaque no elemento central',
+  'ângulo superior, visão de contexto',
+  'composição diagonal, perspectiva dramática',
 ];
+
+const TARGET_WORDS = 15;
+const MIN_WORDS = 10;
+const MAX_WORDS = 20;
 
 export function splitIntoSubScenes(
   narration: string,
@@ -22,16 +29,12 @@ export function splitIntoSubScenes(
   const words = narration.trim().split(/\s+/);
   const wordCount = words.length;
 
-  // Increased thresholds to avoid very short sub-scenes
-  let numSubScenes: number;
-  if (wordCount < 30) numSubScenes = 1;
-  else if (wordCount < 55) numSubScenes = 2;
-  else if (wordCount < 80) numSubScenes = 3;
-  else numSubScenes = 4;
+  // Calculate ideal number of sub-scenes
+  let numSubScenes = Math.max(1, Math.round(wordCount / TARGET_WORDS));
 
   // Split narration into sentences, then distribute among sub-scenes
   const sentences = narration.match(/[^.!?]+[.!?]*/g) || [narration];
-  const subScenes: SubSceneInput[] = [];
+  let subScenes: SubSceneInput[] = [];
 
   // Distribute sentences evenly
   const perSubScene = Math.ceil(sentences.length / numSubScenes);
@@ -40,37 +43,53 @@ export function splitIntoSubScenes(
     const start = i * perSubScene;
     const end = Math.min(start + perSubScene, sentences.length);
     const chunk = sentences.slice(start, end).join(' ').trim();
-
     if (!chunk) continue;
-
-    const prompt = baseImagePrompt
-      ? `${baseImagePrompt} — ${PERSPECTIVE_HINTS[i]}`
-      : null;
 
     subScenes.push({
       sub_index: i + 1,
       narration_segment: chunk,
-      image_prompt: prompt,
+      image_prompt: null,
     });
   }
 
-  // Merge sub-scenes that are too short (< 15 words ≈ < 6s of narration)
-  const MIN_WORDS = 15;
+  // Merge sub-scenes that are too short (< MIN_WORDS)
   for (let i = subScenes.length - 1; i > 0; i--) {
     const sceneWords = subScenes[i].narration_segment.trim().split(/\s+/).length;
     if (sceneWords < MIN_WORDS) {
-      // Merge into previous sub-scene
       subScenes[i - 1].narration_segment += ' ' + subScenes[i].narration_segment;
       subScenes.splice(i, 1);
     }
   }
 
-  // Re-index after merging
+  // Split sub-scenes that are too long (> MAX_WORDS)
+  const expanded: SubSceneInput[] = [];
+  for (const scene of subScenes) {
+    const sceneWords = scene.narration_segment.trim().split(/\s+/);
+    if (sceneWords.length > MAX_WORDS) {
+      const parts = Math.ceil(sceneWords.length / TARGET_WORDS);
+      const perPart = Math.ceil(sceneWords.length / parts);
+      for (let j = 0; j < parts; j++) {
+        const partWords = sceneWords.slice(j * perPart, (j + 1) * perPart);
+        if (partWords.length > 0) {
+          expanded.push({
+            sub_index: 0,
+            narration_segment: partWords.join(' '),
+            image_prompt: null,
+          });
+        }
+      }
+    } else {
+      expanded.push(scene);
+    }
+  }
+  subScenes = expanded;
+
+  // Re-index and assign prompts cyclically
   subScenes.forEach((s, idx) => {
     s.sub_index = idx + 1;
-    if (baseImagePrompt) {
-      s.image_prompt = `${baseImagePrompt} — ${PERSPECTIVE_HINTS[idx] || PERSPECTIVE_HINTS[0]}`;
-    }
+    s.image_prompt = baseImagePrompt
+      ? `${baseImagePrompt} — ${PERSPECTIVE_HINTS[idx % PERSPECTIVE_HINTS.length]}`
+      : null;
   });
 
   // Ensure at least 1 sub-scene
