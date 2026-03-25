@@ -35,6 +35,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [genSubSceneId, setGenSubSceneId] = useState<string | null>(null);
   const [styleTemplateId, setStyleTemplateId] = useState<string | null>(null);
   const [stylePrefix, setStylePrefix] = useState<string>('');
+  const [selectedAssets, setSelectedAssets] = useState<AssetReference[]>([]);
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
