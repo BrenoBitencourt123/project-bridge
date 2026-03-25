@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
 import { findSubSceneCutPoints } from '@/lib/find-cut-points';
 import { AudioImportDialog } from './AudioImportDialog';
+import { AssetReferenceSelector, type AssetReference } from './AssetReferenceSelector';
 import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
@@ -34,6 +35,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [genSubSceneId, setGenSubSceneId] = useState<string | null>(null);
   const [styleTemplateId, setStyleTemplateId] = useState<string | null>(null);
   const [stylePrefix, setStylePrefix] = useState<string>('');
+  const [selectedAssets, setSelectedAssets] = useState<AssetReference[]>([]);
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
@@ -151,6 +153,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
               subIndex: sc.sub_index,
               momentType: seg.moment_type,
               stylePrefix,
+              assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
             },
           });
           if (error) throw error;
@@ -305,6 +308,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           subIndex: sc.sub_index,
           momentType: seg.moment_type,
           stylePrefix,
+          assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
         },
       });
       if (error) throw error;
@@ -323,10 +327,16 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       <div className="sticky top-14 z-40 rounded-lg border bg-card p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold">Geração de Mídia</h3>
-          <StyleTemplateSelector
-            value={styleTemplateId}
-            onChange={(id, prefix) => { setStyleTemplateId(id); setStylePrefix(prefix); }}
-          />
+          <div className="flex items-center gap-2">
+            <AssetReferenceSelector
+              selectedAssets={selectedAssets}
+              onSelectionChange={setSelectedAssets}
+            />
+            <StyleTemplateSelector
+              value={styleTemplateId}
+              onChange={(id, prefix) => { setStyleTemplateId(id); setStylePrefix(prefix); }}
+            />
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={handleRegeneratePrompts} disabled={regenerating}>

@@ -13,7 +13,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { imagePrompt, projectId, segmentId, sequenceNumber, subIndex, momentType, stylePrefix } = await req.json();
+    const { imagePrompt, projectId, segmentId, sequenceNumber, subIndex, momentType, stylePrefix, assetDescriptions } = await req.json();
     if (!imagePrompt || !projectId) throw new Error("imagePrompt and projectId required");
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -26,6 +26,16 @@ serve(async (req) => {
 
     const activeStyle = stylePrefix || DEFAULT_STYLE;
 
+    // Build asset reference block if descriptions are provided
+    let assetBlock = '';
+    if (assetDescriptions && Array.isArray(assetDescriptions) && assetDescriptions.length > 0) {
+      const assetLines = assetDescriptions.map(
+        (a: { name: string; description: string; category?: string }) =>
+          `- ${a.name}: ${a.description}`
+      ).join('\n');
+      assetBlock = `\nVISUAL REFERENCES (use these descriptions to maintain visual consistency for recurring elements):\n${assetLines}\nIMPORTANT: If any of the visual references above are relevant to the scene, include them with the exact appearance described.\n`;
+    }
+
     const fullPrompt = `ABSOLUTE REQUIREMENT: Aspect ratio 16:9 (1920x1080 widescreen).
 CRITICAL LANGUAGE RULE: ALL visible text in the image MUST be in Brazilian Portuguese (PT-BR). NEVER use English text.
 ANTI-NARRATION TEXT RULE: NEVER transcribe full narration sentences into the image. Maximum 1-4 visible words (titles, labels, numeric values only).
@@ -33,7 +43,7 @@ ACRONYM RULE: Use correct abbreviated form of acronyms, never spell them phoneti
 COMPOSITION RULE: Main element centered occupying 60-70% of the frame. Supporting context at the edges.
 ${activeStyle}
 NEVER include brand names, channel names, or logos.
-
+${assetBlock}
 Scene: ${imagePrompt}`;
 
     const response = await fetch(
