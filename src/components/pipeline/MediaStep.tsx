@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -35,6 +35,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [styleTemplateId, setStyleTemplateId] = useState<string | null>(null);
   const [stylePrefix, setStylePrefix] = useState<string>('');
 
+  const segmentsRef = useRef(segments);
+  segmentsRef.current = segments;
+
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
   const subAudiosDone = allSubScenes.filter(sc => sc.audio_status === 'done').length;
@@ -58,11 +61,12 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         },
         (payload) => {
           const updated = payload.new as SubScene;
-          // Only process if it belongs to our segments
           if (!segmentIds.includes(updated.segment_id)) return;
           
+          // Use ref to always get latest segments
+          const currentSegments = segmentsRef.current;
           onSegmentsChange(
-            segments.map(seg => {
+            currentSegments.map(seg => {
               if (seg.id !== updated.segment_id) return seg;
               return {
                 ...seg,
@@ -87,8 +91,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     onSegmentsChange(updated);
   };
 
-  const updateSubSceneInSegments = (segmentId: string, subSceneId: string, updates: Partial<SubScene>) => {
-    const updated = segments.map(seg => {
+  const updateSubSceneInSegments = useCallback((segmentId: string, subSceneId: string, updates: Partial<SubScene>) => {
+    const current = segmentsRef.current;
+    const updated = current.map(seg => {
       if (seg.id !== segmentId) return seg;
       return {
         ...seg,
@@ -98,7 +103,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       };
     });
     onSegmentsChange(updated);
-  };
+  }, [onSegmentsChange]);
 
   const handleRegeneratePrompts = async () => {
     setRegenerating(true);
