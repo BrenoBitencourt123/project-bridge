@@ -327,10 +327,16 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       <div className="sticky top-14 z-40 rounded-lg border bg-card p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold">Geração de Mídia</h3>
-          <StyleTemplateSelector
-            value={styleTemplateId}
-            onChange={(id, prefix) => { setStyleTemplateId(id); setStylePrefix(prefix); }}
-          />
+          <div className="flex items-center gap-2">
+            <AssetReferenceSelector
+              selectedAssets={selectedAssets}
+              onSelectionChange={setSelectedAssets}
+            />
+            <StyleTemplateSelector
+              value={styleTemplateId}
+              onChange={(id, prefix) => { setStyleTemplateId(id); setStylePrefix(prefix); }}
+            />
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={handleRegeneratePrompts} disabled={regenerating}>
