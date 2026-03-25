@@ -308,6 +308,8 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           subIndex: sc.sub_index,
           momentType: seg.moment_type,
           stylePrefix,
+          assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
+        },
         },
       });
       if (error) throw error;
