@@ -1,46 +1,44 @@
 
 
-# Reduzir quantidade de imagens alinhando com referência Atlas-new-creators
+# Painel de Custo Estimado por Etapa do Pipeline
 
-## Problema atual
-O sistema gera imagens demais para um vídeo de 6-8 minutos. Isso acontece em duas camadas:
+## Resumo dos custos reais por API
 
-1. **Segmentação (segment-script)**: O prompt pede "40 a 60 blocos para um roteiro de 10 minutos" com 30-90 palavras cada
-2. **Sub-cenas (split-sub-scenes.ts)**: Cada bloco é subdividido em sub-cenas de 10-20 palavras (TARGET=15), gerando 2-5 sub-cenas por bloco
+| Etapa | API | Chave usada | Custo aproximado |
+|---|---|---|---|
+| Gerar Roteiro | Gemini 2.5 Flash | `GOOGLE_AI_API_KEY` (sua) | ~$0.15/1M tokens input, ~$0.60/1M output |
+| Segmentar Roteiro | Gemini 1.5 Flash | `GOOGLE_AI_API_KEY` (sua) | ~$0.075/1M tokens input |
+| Gerar Prompts | Gemini | `GOOGLE_AI_API_KEY` (sua) | ~$0.15/1M tokens |
+| Gerar Imagens | Gemini 3 Pro Image | `LOVABLE_API_KEY` (Lovable) | Incluso nos créditos Lovable |
+| Gerar Áudio | ElevenLabs | `ELEVENLABS_API_KEY` (sua) | ~$0.30/1K caracteres |
+| Transcrever Áudio | OpenAI Whisper | `OPENAI_API_KEY` (sua) | ~$0.006/minuto |
 
-Resultado: 40 blocos x ~3 sub-cenas = ~120 imagens. Para 6-8 min, isso é excessivo.
+## Exemplo para vídeo de 8 min (~1760 palavras)
 
-## Como a referência (Atlas-new-creators) faz
+- **Roteiro (Gemini)**: ~$0.002
+- **Segmentação (Gemini)**: ~$0.001
+- **Prompts (Gemini)**: ~$0.001
+- **Imagens (Lovable AI)**: $0.00
+- **Áudio (ElevenLabs)**: ~$2.50-3.50 (8000-12000 chars)
+- **Transcrição (Whisper)**: ~$0.05
+- **Total estimado**: ~$2.50-3.60
 
-A função `splitNarrationIntoSubScenes` da referência usa regras muito mais conservadoras:
-- < 25 palavras → 1 sub-cena
-- < 50 palavras → 2 sub-cenas
-- < 75 palavras → 3 sub-cenas
-- >= 75 palavras → 4 sub-cenas (MAX)
-- Nunca mais que 4 sub-cenas por segmento
+## Plano de implementação
 
-## Plano de alteração
+### 1. Criar `src/components/pipeline/CostEstimateCard.tsx`
+Card compacto com ícone de DollarSign mostrando breakdown por etapa:
+- Recebe props: `wordCount`, `charCount`, `subSceneCount`, `audioDurationMin`, `step` (current pipeline step)
+- Calcula custos por fórmulas simples
+- Mostra cada linha com nome da API, custo estimado, e badge "sua chave" ou "incluso"
+- Linha de total no rodapé
 
-### 1. Ajustar `src/lib/split-sub-scenes.ts`
-Adotar a lógica da referência:
-- Substituir a lógica atual (TARGET_WORDS/MIN_WORDS/MAX_WORDS) pela lógica de faixas de palavras
-- Cap de MAX 4 sub-cenas por segmento
-- Manter a distribuição por sentenças e os PERSPECTIVE_HINTS
+### 2. Integrar nos steps do pipeline
+- **ScriptStep**: Mostrar custo da geração de roteiro (Gemini) baseado em palavras
+- **SegmentsStep**: Custo de segmentação + estimativa de imagens e áudio que virão (baseado no número de sub-cenas e total de caracteres de narração)
+- **MediaStep**: Custo real de imagens (zero) + custo do áudio ElevenLabs baseado nos caracteres totais das narrações
+- **ExportStep**: Resumo do custo total acumulado do projeto
 
-### 2. Ajustar prompt do `supabase/functions/segment-script/index.ts`
-- Reduzir de "40 a 60 blocos" para "8 a 15 blocos para um roteiro de ~8 minutos"
-- Aumentar faixa de palavras por bloco de "30-90" para "60-150" (blocos maiores = menos blocos)
-- Isso resulta em ~12 blocos x ~2-3 sub-cenas = ~30-40 imagens total
-
-### 3. Ajustar `MIN_GAP_SECONDS` em `find-cut-points.ts`
-- Manter em 7 segundos, que agora fará mais sentido com menos sub-cenas
-
-## Resultado esperado
-- Vídeo de 6-8 min: ~30-40 imagens (em vez de 100+)
-- Cada imagem fica visível por 7-15 segundos
-- Alinhado com a abordagem da referência
-
-## Arquivos alterados
-- `src/lib/split-sub-scenes.ts` — lógica de subdivisão
-- `supabase/functions/segment-script/index.ts` — prompt de segmentação
+### Arquivos
+- **Novo**: `src/components/pipeline/CostEstimateCard.tsx`
+- **Editados**: `ScriptStep.tsx`, `SegmentsStep.tsx`, `MediaStep.tsx`, `ExportStep.tsx`
 
