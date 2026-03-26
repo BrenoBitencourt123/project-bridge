@@ -1,5 +1,10 @@
 /**
- * Splits a segment's narration into sub-scenes of 10-20 words each (~4-8 seconds).
+ * Splits a segment's narration into sub-scenes based on word count ranges.
+ * Aligned with Atlas-new-creators reference:
+ * < 25 words → 1 sub-scene
+ * < 50 words → 2 sub-scenes
+ * < 75 words → 3 sub-scenes
+ * >= 75 words → 4 sub-scenes (MAX)
  */
 export interface SubSceneInput {
   sub_index: number;
@@ -12,15 +17,16 @@ const PERSPECTIVE_HINTS = [
   'close-up detalhado, ângulo diferente',
   'visão panorâmica, contexto amplo',
   'perspectiva criativa, ângulo alternativo',
-  'vista lateral, composição dinâmica',
-  'plano médio, destaque no elemento central',
-  'ângulo superior, visão de contexto',
-  'composição diagonal, perspectiva dramática',
 ];
 
-const TARGET_WORDS = 15;
-const MIN_WORDS = 10;
-const MAX_WORDS = 20;
+const MAX_SUB_SCENES = 4;
+
+function getTargetSubSceneCount(wordCount: number): number {
+  if (wordCount < 25) return 1;
+  if (wordCount < 50) return 2;
+  if (wordCount < 75) return 3;
+  return MAX_SUB_SCENES;
+}
 
 export function splitIntoSubScenes(
   narration: string,
@@ -28,15 +34,21 @@ export function splitIntoSubScenes(
 ): SubSceneInput[] {
   const words = narration.trim().split(/\s+/);
   const wordCount = words.length;
+  const numSubScenes = getTargetSubSceneCount(wordCount);
 
-  // Calculate ideal number of sub-scenes
-  let numSubScenes = Math.max(1, Math.round(wordCount / TARGET_WORDS));
+  if (numSubScenes === 1) {
+    return [{
+      sub_index: 1,
+      narration_segment: narration.trim(),
+      image_prompt: baseImagePrompt
+        ? `${baseImagePrompt} — ${PERSPECTIVE_HINTS[0]}`
+        : null,
+    }];
+  }
 
-  // Split narration into sentences, then distribute among sub-scenes
+  // Split by sentences then distribute
   const sentences = narration.match(/[^.!?]+[.!?]*/g) || [narration];
-  let subScenes: SubSceneInput[] = [];
-
-  // Distribute sentences evenly
+  const subScenes: SubSceneInput[] = [];
   const perSubScene = Math.ceil(sentences.length / numSubScenes);
 
   for (let i = 0; i < numSubScenes; i++) {
@@ -48,55 +60,17 @@ export function splitIntoSubScenes(
     subScenes.push({
       sub_index: i + 1,
       narration_segment: chunk,
-      image_prompt: null,
+      image_prompt: baseImagePrompt
+        ? `${baseImagePrompt} — ${PERSPECTIVE_HINTS[i % PERSPECTIVE_HINTS.length]}`
+        : null,
     });
   }
 
-  // Merge sub-scenes that are too short (< MIN_WORDS)
-  for (let i = subScenes.length - 1; i > 0; i--) {
-    const sceneWords = subScenes[i].narration_segment.trim().split(/\s+/).length;
-    if (sceneWords < MIN_WORDS) {
-      subScenes[i - 1].narration_segment += ' ' + subScenes[i].narration_segment;
-      subScenes.splice(i, 1);
-    }
-  }
-
-  // Split sub-scenes that are too long (> MAX_WORDS)
-  const expanded: SubSceneInput[] = [];
-  for (const scene of subScenes) {
-    const sceneWords = scene.narration_segment.trim().split(/\s+/);
-    if (sceneWords.length > MAX_WORDS) {
-      const parts = Math.ceil(sceneWords.length / TARGET_WORDS);
-      const perPart = Math.ceil(sceneWords.length / parts);
-      for (let j = 0; j < parts; j++) {
-        const partWords = sceneWords.slice(j * perPart, (j + 1) * perPart);
-        if (partWords.length > 0) {
-          expanded.push({
-            sub_index: 0,
-            narration_segment: partWords.join(' '),
-            image_prompt: null,
-          });
-        }
-      }
-    } else {
-      expanded.push(scene);
-    }
-  }
-  subScenes = expanded;
-
-  // Re-index and assign prompts cyclically
-  subScenes.forEach((s, idx) => {
-    s.sub_index = idx + 1;
-    s.image_prompt = baseImagePrompt
-      ? `${baseImagePrompt} — ${PERSPECTIVE_HINTS[idx % PERSPECTIVE_HINTS.length]}`
-      : null;
-  });
-
-  // Ensure at least 1 sub-scene
+  // If we got fewer sub-scenes than sentences allowed, ensure at least 1
   if (subScenes.length === 0) {
     subScenes.push({
       sub_index: 1,
-      narration_segment: narration,
+      narration_segment: narration.trim(),
       image_prompt: baseImagePrompt,
     });
   }
