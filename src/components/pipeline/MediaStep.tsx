@@ -118,7 +118,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
               sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
               stylePrefix,
               assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
-              assetImageUrls: selectedAssets.map(a => a.image_url),
+              assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
             },
           });
           if (error) throw error;
@@ -250,7 +250,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
            stylePrefix,
             assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
-            assetImageUrls: selectedAssets.map(a => a.image_url),
+            assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
         },
       });
       if (error) throw error;

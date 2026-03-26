@@ -47,17 +47,29 @@ NEVER include brand names, channel names, or logos.
 ${assetBlock}
 Scene: ${imagePrompt}`;
 
-    // Build multimodal content parts: text + real asset images
+    // Build multimodal content parts: text + real asset images as inline base64
     const contentParts: any[] = [{ type: "text", text: textPrompt }];
 
-    // Add real asset images as image_url parts so the AI can "see" them
+    // Fetch asset images and convert to base64 inline data (like reference repo)
     if (assetImageUrls && Array.isArray(assetImageUrls)) {
-      for (const url of assetImageUrls) {
-        if (url && typeof url === 'string') {
+      const urls = assetImageUrls.filter((u: unknown) => u && typeof u === 'string').slice(0, 5);
+      for (const url of urls) {
+        try {
+          const imgRes = await fetch(url as string);
+          if (!imgRes.ok) { console.warn(`Failed to fetch asset image: ${url}`); continue; }
+          const buf = await imgRes.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          const b64 = btoa(binary);
+          const contentType = imgRes.headers.get('content-type') || 'image/png';
           contentParts.push({
             type: "image_url",
-            image_url: { url },
+            image_url: { url: `data:${contentType};base64,${b64}` },
           });
+          console.log(`Asset image loaded as base64: ${(url as string).slice(-40)} (${bytes.length} bytes)`);
+        } catch (e) {
+          console.warn(`Error fetching asset image ${url}:`, e);
         }
       }
     }
