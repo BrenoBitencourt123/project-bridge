@@ -1,7 +1,7 @@
 /**
- * Splits a segment's narration into sub-scenes based on word count and moment type.
- * CTA and hook segments get max 1 sub-scene.
- * Other types follow word-count-based splitting (target 7-10s per sub-scene).
+ * Divide a narração de um segmento em sub-cenas com base no total de palavras.
+ * Thresholds: < 25 → 1, 25-49 → 2, 50-74 → 3, 75+ → 4 sub-cenas.
+ * Cada sub-cena recebe uma posição (OPENING/MIDDLE/CLOSING/FINAL) e ângulo de câmera.
  */
 export interface SubSceneInput {
   sub_index: number;
@@ -9,81 +9,90 @@ export interface SubSceneInput {
   image_prompt: string | null;
 }
 
-const PERSPECTIVE_HINTS = [
-  'vista frontal, foco no conceito principal',
-  'close-up detalhado, ângulo diferente',
-  'visão panorâmica, contexto amplo',
-  'perspectiva criativa, ângulo alternativo',
-];
+type SubPosition = 'OPENING' | 'MIDDLE' | 'CLOSING' | 'FINAL';
 
-const MAX_SUB_SCENES = 4;
+const CAMERA_ANGLES: Record<SubPosition, string> = {
+  OPENING: 'plano médio, apresentação do conceito',
+  MIDDLE:  'close-up detalhado, foco no desenvolvimento',
+  CLOSING: 'plano geral, síntese visual',
+  FINAL:   'plano panorâmico, conclusão ampla',
+};
 
-// Moment types that should NEVER be split into multiple sub-scenes
-const SINGLE_SUB_SCENE_TYPES = new Set(['cta', 'hook']);
-
-function getTargetSubSceneCount(wordCount: number, momentType?: string | null, maxSubScenes?: number | null): number {
-  // CTA and hook always get 1 sub-scene
-  if (momentType && SINGLE_SUB_SCENE_TYPES.has(momentType)) return 1;
-  
-  // If the AI suggested a max, respect it (clamped to 1-4)
-  if (maxSubScenes != null && maxSubScenes >= 1) {
-    return Math.min(maxSubScenes, MAX_SUB_SCENES);
-  }
-
-  // Default word-count-based logic
+function getSubSceneCount(wordCount: number): number {
   if (wordCount < 25) return 1;
   if (wordCount < 50) return 2;
   if (wordCount < 75) return 3;
-  return MAX_SUB_SCENES;
+  return 4;
+}
+
+function derivePosition(subIndex: number, total: number): SubPosition {
+  if (total === 1) return 'OPENING';
+  if (subIndex === 1) return 'OPENING';
+  if (total <= 3) return subIndex === total ? 'CLOSING' : 'MIDDLE';
+  return subIndex === total ? 'FINAL' : 'MIDDLE';
+}
+
+function distributeProportionally(sentences: string[], count: number): string[] {
+  if (count === 1) return [sentences.join(' ')];
+  const groups: string[] = [];
+  const perGroup = Math.ceil(sentences.length / count);
+  for (let i = 0; i < count; i++) {
+    const chunk = sentences.slice(i * perGroup, (i + 1) * perGroup);
+    if (chunk.length > 0) groups.push(chunk.join(' '));
+  }
+  return groups;
 }
 
 export function splitIntoSubScenes(
   narration: string,
   baseImagePrompt: string | null,
-  momentType?: string | null,
-  maxSubScenes?: number | null
+  _momentType?: string | null,
+  _maxSubScenes?: number | null // ignorado — thresholds de palavras são mais confiáveis
 ): SubSceneInput[] {
-  const words = narration.trim().split(/\s+/);
-  const wordCount = words.length;
-  const numSubScenes = getTargetSubSceneCount(wordCount, momentType, maxSubScenes);
+  const wordCount = narration.trim().split(/\s+/).length;
+  const count = getSubSceneCount(wordCount);
 
-  if (numSubScenes === 1) {
+  // 1 sub-cena → retorna direto sem dividir
+  if (count === 1) {
+    const pos = 'OPENING';
     return [{
       sub_index: 1,
       narration_segment: narration.trim(),
       image_prompt: baseImagePrompt
-        ? `${baseImagePrompt} — ${PERSPECTIVE_HINTS[0]}`
+        ? `${baseImagePrompt} — ${pos}: ${CAMERA_ANGLES[pos]}`
         : null,
     }];
   }
 
-  // Split by sentences then distribute
-  const sentences = narration.match(/[^.!?]+[.!?]*/g) || [narration];
-  const subScenes: SubSceneInput[] = [];
-  const perSubScene = Math.ceil(sentences.length / numSubScenes);
+  // Divide em frases usando lookbehind para não cortar abreviações
+  const sentences = narration
+    .split(/(?<=[.!?…])\s+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 5);
 
-  for (let i = 0; i < numSubScenes; i++) {
-    const start = i * perSubScene;
-    const end = Math.min(start + perSubScene, sentences.length);
-    const chunk = sentences.slice(start, end).join(' ').trim();
-    if (!chunk) continue;
+  // Fallback: sem frases identificáveis → narração inteira como 1 sub-cena
+  if (sentences.length === 0) {
+    const pos = 'OPENING';
+    return [{
+      sub_index: 1,
+      narration_segment: narration.trim(),
+      image_prompt: baseImagePrompt
+        ? `${baseImagePrompt} — ${pos}: ${CAMERA_ANGLES[pos]}`
+        : null,
+    }];
+  }
 
-    subScenes.push({
+  const chunks = distributeProportionally(sentences, count);
+  const total = chunks.length;
+
+  return chunks.map((chunk, i) => {
+    const pos = derivePosition(i + 1, total);
+    return {
       sub_index: i + 1,
       narration_segment: chunk,
       image_prompt: baseImagePrompt
-        ? `${baseImagePrompt} — ${PERSPECTIVE_HINTS[i % PERSPECTIVE_HINTS.length]}`
+        ? `${baseImagePrompt} — ${pos}: ${CAMERA_ANGLES[pos]}`
         : null,
-    });
-  }
-
-  if (subScenes.length === 0) {
-    subScenes.push({
-      sub_index: 1,
-      narration_segment: narration.trim(),
-      image_prompt: baseImagePrompt,
-    });
-  }
-
-  return subScenes;
+    };
+  });
 }

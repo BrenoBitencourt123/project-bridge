@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Zap, Settings, LogOut, Plus, ImageIcon, Sparkles, Loader2, Trash2, BarChart3, Package } from 'lucide-react';
+import { Plus, ImageIcon, Sparkles, Loader2, Trash2, Video, CheckCircle2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +16,7 @@ import { Project, STATUS_CONFIG } from '@/types/atlas';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -50,7 +50,7 @@ export default function Dashboard() {
       if (error) throw error;
       return data;
     },
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       setNewProjectOpen(false);
       setPasteScript('');
@@ -126,39 +126,49 @@ export default function Dashboard() {
     }
   };
 
-  return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-2">
-            <Zap className="h-6 w-6 text-primary" />
-            <span className="text-lg font-bold">Atlas Studio</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/assets')} className="gap-1">
-              <Package className="h-4 w-4" /> Assets
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/analytics')} className="gap-1">
-              <BarChart3 className="h-4 w-4" /> Analytics
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
-              <Settings className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={signOut}>
-              <LogOut className="h-5 w-5" />
-            </Button>
-          </div>
-        </div>
-      </header>
+  const totalProjects = projects.length;
+  const completedProjects = projects.filter(p => p.status === 'complete').length;
+  const inProgressProjects = projects.filter(p => p.status !== 'complete' && p.status !== 'draft').length;
 
-      {/* Content */}
-      <main className="mx-auto max-w-7xl px-4 py-8">
-        <div className="mb-6 flex items-end justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Projetos</h1>
-            <p className="text-sm text-muted-foreground">Seus vídeos educacionais para o ENEM</p>
+  return (
+    <div className="min-h-full p-6 space-y-6">
+      {/* Métricas */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="p-4 flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-2">
+            <Video className="h-5 w-5 text-primary" />
           </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Total de projetos</p>
+            <p className="text-2xl font-bold">{totalProjects}</p>
+          </div>
+        </Card>
+        <Card className="p-4 flex items-center gap-3">
+          <div className="rounded-lg bg-success/10 p-2">
+            <CheckCircle2 className="h-5 w-5 text-success" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Completos</p>
+            <p className="text-2xl font-bold">{completedProjects}</p>
+          </div>
+        </Card>
+        <Card className="p-4 flex items-center gap-3">
+          <div className="rounded-lg bg-warning/10 p-2">
+            <Clock className="h-5 w-5 text-warning" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Em produção</p>
+            <p className="text-2xl font-bold">{inProgressProjects}</p>
+          </div>
+        </Card>
+      </div>
+
+      {/* Projetos */}
+      <div className="flex items-end justify-between">
+        <div>
+          <h1 className="text-xl font-bold">Projetos</h1>
+          <p className="text-sm text-muted-foreground">Seus vídeos em produção</p>
+        </div>
           <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4" /> Novo Projeto</Button>
@@ -254,7 +264,6 @@ export default function Dashboard() {
             })}
           </div>
         )}
-      </main>
 
       {/* Thumbnail Dialog */}
       <Dialog open={thumbnailDialog.open} onOpenChange={open => setThumbnailDialog({ open, project: open ? thumbnailDialog.project : null })}>
@@ -277,3 +286,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

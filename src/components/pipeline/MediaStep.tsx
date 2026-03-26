@@ -25,6 +25,14 @@ interface MediaStepProps {
   onGeneratingChange?: (generating: boolean) => void;
 }
 
+/** Deriva a posição da sub-cena para rotação de ângulo de câmera */
+function deriveSubPosition(subIndex: number, total: number): string {
+  if (subIndex === 1) return 'opening';
+  if (total <= 2) return subIndex === total ? 'closing' : 'middle';
+  if (subIndex === total) return total >= 4 ? 'final' : 'closing';
+  return 'middle';
+}
+
 /** Crop a panel image into N equal vertical slices using Canvas */
 async function cropPanelsFromImage(imageUrl: string, panelCount: number): Promise<string[]> {
   return new Promise((resolve, reject) => {
@@ -72,6 +80,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [genSubSceneId, setGenSubSceneId] = useState<string | null>(null);
   const [styleTemplateId, setStyleTemplateId] = useState<string | null>(null);
   const [stylePrefix, setStylePrefix] = useState<string>('');
+  const [styleName, setStyleName] = useState<string>('');
   const [selectedAssets, setSelectedAssets] = useState<AssetReference[]>([]);
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
@@ -182,7 +191,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
       // Use panel mode when 2-3 pending sub-scenes exist
       if (pendingSubs.length >= 2 && pendingSubs.length <= 3) {
-        // Mark all as generating
         for (const sc of pendingSubs) {
           updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
         }
@@ -191,10 +199,12 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           const { data, error } = await supabase.functions.invoke('generate-image', {
             body: {
               imagePrompt: seg.image_prompt,
+              narration: seg.narration,
               projectId: project.id,
               segmentId: seg.id,
               sequenceNumber: seg.sequence_number,
               momentType: seg.moment_type,
+              styleName,
               stylePrefix,
               ...assetPayload,
               panelCount: pendingSubs.length,
@@ -217,9 +227,11 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', pendingSubs[0].id);
             done++;
             setImageProgress((done / totalSubScenes) * 100);
-            // Generate remaining individually
+            // Generate remaining individually with anti-repetição
+            const illustrated = [pendingSubs[0].image_prompt || ''].filter(Boolean);
             for (let i = 1; i < pendingSubs.length; i++) {
-              await generateSingleSubSceneImage(seg, pendingSubs[i], assetPayload);
+              await generateSingleSubSceneImage(seg, pendingSubs[i], assetPayload, illustrated);
+              if (pendingSubs[i].image_prompt) illustrated.push(pendingSubs[i].image_prompt!);
               done++;
               setImageProgress((done / totalSubScenes) * 100);
             }
@@ -234,9 +246,11 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         }
         setStatusText('');
       } else {
-        // Single mode: generate one by one (1 sub-scene or 4+)
+        // Single mode: generate one by one (1 sub-scene or 4+) com anti-repetição acumulada
+        const illustrated: string[] = [];
         for (const sc of pendingSubs) {
-          await generateSingleSubSceneImage(seg, sc, assetPayload);
+          await generateSingleSubSceneImage(seg, sc, assetPayload, illustrated);
+          if (sc.image_prompt) illustrated.push(sc.image_prompt);
           done++;
           setImageProgress((done / totalSubScenes) * 100);
         }
@@ -251,14 +265,28 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
   const generateSingleSubSceneImage = async (
     seg: Segment, sc: SubScene,
-    assetPayload: { assetDescriptions: any[]; assetImageUrls: string[] }
+    assetPayload: { assetDescriptions: any[]; assetImageUrls: string[] },
+    alreadyIllustrated: string[] = []
   ) => {
+    const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
+    const total = subScenes.length;
+    const subPosition = deriveSubPosition(sc.sub_index, total);
+
     updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
     try {
       const { data, error } = await supabase.functions.invoke('generate-image', {
         body: {
-          imagePrompt: sc.image_prompt, projectId: project.id, segmentId: seg.id,
-          sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
+          imagePrompt: sc.image_prompt,
+          narration: sc.narration_segment,
+          projectId: project.id,
+          segmentId: seg.id,
+          sequenceNumber: seg.sequence_number,
+          subIndex: sc.sub_index,
+          subPosition,
+          totalSubScenes: total,
+          alreadyIllustrated,
+          momentType: seg.moment_type,
+          styleName,
           stylePrefix,
           ...assetPayload,
         },
@@ -376,12 +404,28 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
   const handleGenerateSingleImage = async (seg: Segment, sc: SubScene) => {
     setGenSubSceneId(sc.id);
+    const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
+    const total = subScenes.length;
+    const subPosition = deriveSubPosition(sc.sub_index, total);
+    const alreadyIllustrated = subScenes
+      .filter(s => s.sub_index < sc.sub_index && s.image_status === 'done' && s.image_prompt)
+      .map(s => s.image_prompt!);
+
     updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
     try {
       const { data, error } = await supabase.functions.invoke('generate-image', {
         body: {
-          imagePrompt: sc.image_prompt, projectId: project.id, segmentId: seg.id,
-          sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
+          imagePrompt: sc.image_prompt,
+          narration: sc.narration_segment,
+          projectId: project.id,
+          segmentId: seg.id,
+          sequenceNumber: seg.sequence_number,
+          subIndex: sc.sub_index,
+          subPosition,
+          totalSubScenes: total,
+          alreadyIllustrated,
+          momentType: seg.moment_type,
+          styleName,
           stylePrefix,
           assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
           assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
@@ -410,7 +454,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           </div>
           <div className="flex items-center gap-2">
             <AssetReferenceSelector selectedAssets={selectedAssets} onSelectionChange={setSelectedAssets} />
-            <StyleTemplateSelector value={styleTemplateId} onChange={(id, prefix) => { setStyleTemplateId(id); setStylePrefix(prefix); }} />
+            <StyleTemplateSelector value={styleTemplateId} onChange={(id, prefix, name) => { setStyleTemplateId(id); setStylePrefix(prefix); setStyleName(name || ''); }} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" disabled={isAnyGenerating}>

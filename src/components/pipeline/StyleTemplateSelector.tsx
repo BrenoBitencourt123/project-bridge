@@ -14,7 +14,7 @@ interface StyleTemplate {
 
 interface StyleTemplateSelectorProps {
   value: string | null;
-  onChange: (templateId: string, promptPrefix: string) => void;
+  onChange: (templateId: string, promptPrefix: string, name?: string) => void;
 }
 
 export function StyleTemplateSelector({ value, onChange }: StyleTemplateSelectorProps) {
@@ -34,13 +34,13 @@ export function StyleTemplateSelector({ value, onChange }: StyleTemplateSelector
   useEffect(() => {
     if (!value && templates.length > 0) {
       const defaultTemplate = templates.find(t => t.is_default) || templates[0];
-      onChange(defaultTemplate.id, defaultTemplate.prompt_prefix);
+      onChange(defaultTemplate.id, defaultTemplate.prompt_prefix, defaultTemplate.name);
     }
   }, [templates, value]);
 
   const handleChange = (id: string) => {
     const template = templates.find(t => t.id === id);
-    if (template) onChange(template.id, template.prompt_prefix);
+    if (template) onChange(template.id, template.prompt_prefix, template.name);
   };
 
   return (

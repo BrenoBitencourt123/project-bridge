@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, Layers, Loader2 } from 'lucide-react';
+import { ArrowRight, Layers, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { Project, Segment } from '@/types/atlas';
@@ -18,6 +18,7 @@ interface SegmentsStepProps {
 
 export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, onNext }: SegmentsStepProps) {
   const [segmenting, setSegmenting] = useState(false);
+  const [adapting, setAdapting] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
@@ -25,56 +26,42 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
     if (!project.raw_script) return;
     setSegmenting(true);
     try {
-      const { data, error } = await supabase.functions.invoke('segment-script', {
-        body: { script: project.raw_script },
-      });
-      if (error) throw error;
+      // Parsing local por parágrafos — sem chamada à IA
+      const paragraphs = project.raw_script
+        .split(/\n\n+/)
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
 
-      const validMomentTypes = new Set(['hook', 'concept', 'example', 'list_summary', 'cta']);
-
-      // Delete existing sub_scenes first (cascade would handle it, but let's be safe with existing segments)
+      // Deletar sub-cenas e segmentos existentes
       const existingSegmentIds = segments.map(s => s.id);
       if (existingSegmentIds.length > 0) {
         await supabase.from('sub_scenes').delete().in('segment_id', existingSegmentIds);
       }
-      // Delete existing segments
       await supabase.from('segments').delete().eq('project_id', project.id);
 
-      // Insert new segments
-      const newSegments = data.segments.map((s: any, i: number) => {
-        const rawMomentType = s.momentType || s.moment_type || null;
-        return {
-          project_id: project.id,
-          sequence_number: i + 1,
-          narration: s.narration,
-          image_prompt: s.imagePrompt || s.image_prompt || null,
-          symbolism: s.symbolism || null,
-          moment_type: validMomentTypes.has(rawMomentType) ? rawMomentType : null,
-          duration_estimate: s.narration ? s.narration.split(/\s+/).length / 3.67 : null,
-          image_status: 'idle' as const,
-          audio_status: 'idle' as const,
-        };
-      });
-
-      const validSegments = newSegments.filter((s: any) => s.narration && s.narration.trim() !== '');
+      // Inserir segmentos derivados dos parágrafos
+      const newSegments = paragraphs.map((p, i) => ({
+        project_id: project.id,
+        sequence_number: i + 1,
+        narration: p,
+        image_prompt: null,
+        symbolism: null,
+        moment_type: null,
+        duration_estimate: p.split(/\s+/).length / 3.67,
+        image_status: 'idle' as const,
+        audio_status: 'idle' as const,
+      }));
 
       const { data: inserted, error: insertErr } = await supabase
         .from('segments')
-        .insert(validSegments)
+        .insert(newSegments)
         .select();
       if (insertErr) throw insertErr;
 
-      // Build a map of maxSubScenes from the AI response
-      const maxSubScenesMap = new Map<number, number>();
-      data.segments.forEach((s: any, i: number) => {
-        if (s.maxSubScenes != null) maxSubScenesMap.set(i + 1, s.maxSubScenes);
-      });
-
-      // Create sub-scenes for each inserted segment
+      // Criar sub-cenas para cada segmento
       const allSubScenes: any[] = [];
       for (const seg of inserted) {
-        const maxSub = maxSubScenesMap.get(seg.sequence_number) ?? null;
-        const subSceneInputs = splitIntoSubScenes(seg.narration, seg.image_prompt, seg.moment_type, maxSub);
+        const subSceneInputs = splitIntoSubScenes(seg.narration, seg.image_prompt, seg.moment_type);
         for (const sc of subSceneInputs) {
           allSubScenes.push({
             segment_id: seg.id,
@@ -114,6 +101,90 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
       toast({ title: 'Erro ao segmentar', description: err.message, variant: 'destructive' });
     } finally {
       setSegmenting(false);
+    }
+  };
+
+  const handleAdapt = async () => {
+    if (!project.raw_script) return;
+    setAdapting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('adapt-script', {
+        body: { script: project.raw_script },
+      });
+      if (error) throw error;
+
+      const videoScript: { time: string; narration: string; visual: string }[] = data.video_script || [];
+      if (videoScript.length === 0) throw new Error('A IA não retornou blocos de cena');
+
+      // Deletar sub-cenas e segmentos existentes
+      const existingSegmentIds = segments.map(s => s.id);
+      if (existingSegmentIds.length > 0) {
+        await supabase.from('sub_scenes').delete().in('segment_id', existingSegmentIds);
+      }
+      await supabase.from('segments').delete().eq('project_id', project.id);
+
+      // Inserir segmentos derivados da adaptação com IA
+      const newSegments = videoScript
+        .filter(b => b.narration && b.narration.trim().length > 0)
+        .map((b, i) => ({
+          project_id: project.id,
+          sequence_number: i + 1,
+          narration: b.narration.trim(),
+          image_prompt: b.visual?.trim() || null,
+          symbolism: null,
+          moment_type: null,
+          duration_estimate: b.narration.trim().split(/\s+/).length / 3.67,
+          image_status: 'idle' as const,
+          audio_status: 'idle' as const,
+        }));
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from('segments')
+        .insert(newSegments)
+        .select();
+      if (insertErr) throw insertErr;
+
+      // Criar sub-cenas para cada segmento
+      const allSubScenes: any[] = [];
+      for (const seg of inserted) {
+        const subSceneInputs = splitIntoSubScenes(seg.narration, seg.image_prompt, seg.moment_type);
+        for (const sc of subSceneInputs) {
+          allSubScenes.push({
+            segment_id: seg.id,
+            sub_index: sc.sub_index,
+            narration_segment: sc.narration_segment,
+            image_prompt: sc.image_prompt,
+            image_status: 'idle',
+          });
+        }
+      }
+
+      let insertedSubScenes: any[] = [];
+      if (allSubScenes.length > 0) {
+        const { data: subData, error: subErr } = await supabase
+          .from('sub_scenes')
+          .insert(allSubScenes)
+          .select();
+        if (subErr) throw subErr;
+        insertedSubScenes = subData || [];
+      }
+
+      const segmentsWithSubs = (inserted as Segment[]).map(seg => ({
+        ...seg,
+        sub_scenes: insertedSubScenes
+          .filter((sc: any) => sc.segment_id === seg.id)
+          .sort((a: any, b: any) => a.sub_index - b.sub_index),
+      }));
+
+      await supabase.from('projects').update({ status: 'segmented', updated_at: new Date().toISOString() }).eq('id', project.id);
+      onUpdate({ status: 'segmented' });
+      onSegmentsChange(segmentsWithSubs);
+
+      toast({ title: `${inserted.length} blocos criados com ${insertedSubScenes.length} sub-cenas!` });
+    } catch (err: any) {
+      toast({ title: 'Erro ao adaptar roteiro', description: err.message, variant: 'destructive' });
+    } finally {
+      setAdapting(false);
     }
   };
 
@@ -157,10 +228,19 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
 
   return (
     <div className="space-y-4">
-      <Button variant="outline" onClick={handleSegment} disabled={segmenting}>
-        {segmenting ? <Loader2 className="animate-spin" /> : <Layers className="h-4 w-4" />}
-        {segments.length > 0 ? 'Re-segmentar' : 'Segmentar Roteiro'}
-      </Button>
+      <div className="flex gap-2">
+        <Button onClick={handleAdapt} disabled={adapting || segmenting}>
+          {adapting ? <Loader2 className="animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          {segments.length > 0 ? 'Re-adaptar com IA' : 'Adaptar com IA'}
+        </Button>
+        <Button variant="outline" onClick={handleSegment} disabled={segmenting || adapting}>
+          {segmenting ? <Loader2 className="animate-spin" /> : <Layers className="h-4 w-4" />}
+          {segments.length > 0 ? 'Re-segmentar (rápido)' : 'Segmentar por parágrafos'}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        <strong>Adaptar com IA</strong> gera descrições visuais para cada bloco · <strong>Segmentar por parágrafos</strong> é instantâneo, sem IA
+      </p>
 
       {segments.length > 0 && (
         <>

@@ -7,10 +7,45 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const DEFAULT_STYLE = `STYLE: Hand-drawn sketch on beige/cream paper background. Pencil cross-hatching with slight roughness. Grayscale tones with ONLY blue (#4A90E2) as accent color for highlights and emphasis. Educational illustration style.`;
 const TIMEOUT_MS = 55_000;
 const PRIMARY_MODEL = "google/gemini-3-pro-image-preview";
 const FALLBACK_MODEL = "google/gemini-3.1-flash-image-preview";
+
+// Paletas de estilo fixas — garantem consistência visual em todo o vídeo
+const STYLE_PROMPTS: Record<string, string> = {
+  sketch: `Ilustração desenhada à mão em papel bege/creme texturizado, estilo esboço com hachura a lápis e ligeira aspereza. Paleta: tons de preto, branco e cinza com APENAS laranja como cor de destaque para ênfase. Parece desenhado à mão com lápis no papel. Estilo ilustração educacional.`,
+  impacto: `Ilustração CARTOON/QUADRINHO com texturas de meio-tom (halftone) e sombreamento pop-art retrô. Paleta QUENTE e RICA: âmbar, laranja, azul/teal, marrom, verde terroso. Vibrante e quente como quadrinho (NUNCA neon, NUNCA pastel). Alto contraste dramático.`,
+};
+
+const DEFAULT_STYLE = `Ilustração desenhada à mão em papel bege/creme texturizado, estilo esboço com hachura a lápis. Tons de cinza com APENAS azul (#4A90E2) como cor de destaque. Estilo ilustração educacional.`;
+
+// Rotação de ângulo de câmera por posição da sub-cena
+const CAMERA_ANGLES: Record<string, string> = {
+  opening: "Use PLANO MÉDIO: mostre pessoa ou elemento principal interagindo com o ambiente.",
+  middle:  "Use CLOSE-UP/MACRO: foco em um único objeto, número ou símbolo-chave que represente esse momento.",
+  closing: "Use VISÃO AMPLA/CONCEITUAL: metáfora panorâmica, consequência sistêmica ou visão de conjunto.",
+  final:   "Use PERSPECTIVA CRIATIVA: ângulo alternativo inesperado, composição diferente de tudo que veio antes.",
+};
+
+// Detecta foco visual a partir de palavras-chave na narração
+function detectVisualFocus(narration: string): string {
+  const lower = narration.toLowerCase();
+  if (/dias?|semanas?|meses?|anos?|prazo|tempo|calendário/.test(lower))
+    return "FOCO VISUAL: Mostre passagem do tempo — calendário, relógio ou linha do tempo como metáfora central.";
+  if (/por cento|%|porcentagem|crescimento|número|dado|estatística/.test(lower))
+    return "FOCO VISUAL: Mostre dado numérico — gráfico, barra de progresso ou fatia de pizza.";
+  if (/erro|armadilha|ilusão|engano|perigo|cuidado|atenção/.test(lower))
+    return "FOCO VISUAL: Mostre revelação — lupa expondo verdade oculta ou armadilha sendo revelada.";
+  if (/soma|total|acumulado|pilha|montanha|resultado|efeito/.test(lower))
+    return "FOCO VISUAL: Mostre acumulação — coisas pequenas formando montanha, efeito bola de neve.";
+  if (/transformação|evolução|mudança|antes|depois|virada|muda/.test(lower))
+    return "FOCO VISUAL: Mostre transformação — contraste antes/depois, aura de energia ou linha divisória.";
+  if (/comparação|diferença|versus|vs\.?|melhor|pior|escolha/.test(lower))
+    return "FOCO VISUAL: Mostre comparação — dois caminhos, duas opções ou dois resultados lado a lado.";
+  if (/pessoa|alguém|ela|ele|trabalhador|profissional|usuário/.test(lower))
+    return "FOCO VISUAL: Mostre perspectiva humana — personagem expressivo representando a situação narrada.";
+  return "";
+}
 
 function extractBase64FromResponse(result: any): string | undefined {
   const message = result.choices?.[0]?.message;
@@ -110,7 +145,14 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { imagePrompt, projectId, segmentId, sequenceNumber, subIndex, momentType, stylePrefix, assetDescriptions, assetImageUrls, panelCount, panelPrompts } = await req.json();
+    const {
+      imagePrompt, narration, projectId, segmentId, sequenceNumber,
+      subIndex, subPosition, totalSubScenes, alreadyIllustrated,
+      momentType, styleName, stylePrefix,
+      assetDescriptions, assetImageUrls,
+      panelCount, panelPrompts,
+    } = await req.json();
+
     if (!imagePrompt || !projectId) throw new Error("imagePrompt and projectId required");
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -121,47 +163,73 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const activeStyle = stylePrefix || DEFAULT_STYLE;
+    // Determinar estilo ativo: nome fixo > stylePrefix do DB > padrão
+    const activeStyle = (styleName && STYLE_PROMPTS[styleName])
+      ? STYLE_PROMPTS[styleName]
+      : (stylePrefix || DEFAULT_STYLE);
 
-    // Build asset reference instruction
+    // Bloco de referências de asset/personagem
     let assetBlock = '';
     if (assetDescriptions && Array.isArray(assetDescriptions) && assetDescriptions.length > 0) {
       const assetLines = assetDescriptions.map(
         (a: { name: string; description: string; category?: string }) =>
           `- ${a.name}: ${a.description}`
       ).join('\n');
-      assetBlock = `\nVISUAL REFERENCES:\n${assetLines}\nIMPORTANT: Draw them exactly like the reference images provided — maintaining the same face, hair, and clothing style. But not every scene needs to include them — only when it makes visual sense for the content.\n`;
+      assetBlock = `\nREFERÊNCIAS VISUAIS (personagens/assets):\n${assetLines}\nIMPORTANTE: Desenhe-os exatamente como nas imagens de referência — mantendo rosto, cabelo e estilo de roupa. Inclua-os apenas quando fizer sentido visual para o conteúdo.\n`;
     }
+
+    // Bloco de ângulo de câmera por posição da sub-cena
+    const cameraAngle = subPosition
+      ? (CAMERA_ANGLES[subPosition] || '')
+      : '';
+
+    // Foco visual por palavra-chave na narração
+    const visualFocus = narration ? detectVisualFocus(narration) : '';
+
+    // Bloco de anti-repetição
+    let antiRepetitionBlock = '';
+    if (alreadyIllustrated && Array.isArray(alreadyIllustrated) && alreadyIllustrated.length > 0) {
+      antiRepetitionBlock = `\nJÁ ILUSTRADO — NÃO REPETIR: ${alreadyIllustrated.join('; ')}.\nREGRA DE VARIAÇÃO OBRIGATÓRIA: Use composição, enquadramento e metáfora visual COMPLETAMENTE DIFERENTES das sub-cenas anteriores. NUNCA repita o elemento central de uma imagem anterior.\n`;
+    }
+
+    // Label de posição da sub-cena
+    const posLabels: Record<string, string> = { opening: 'ABERTURA', middle: 'MEIO', closing: 'FECHAMENTO', final: 'FINAL' };
+    const subSceneLabel = (subPosition && totalSubScenes > 1)
+      ? `[${posLabels[subPosition] || subPosition.toUpperCase()} — sub-cena ${subIndex} de ${totalSubScenes}] `
+      : '';
 
     // Build the text prompt — support panel mode
     let textPrompt: string;
     const isPanelMode = panelCount && panelCount > 1 && panelPrompts && Array.isArray(panelPrompts);
 
     if (isPanelMode) {
-      const panelDescriptions = panelPrompts.map((p: string, i: number) => `PANEL ${i + 1}: ${p}`).join('\n');
-      textPrompt = `ABSOLUTE REQUIREMENT: Create a SINGLE image with ${panelCount} panels stacked VERTICALLY.
-Each panel has aspect ratio 16:9. Separate panels with a thin white horizontal line (4px).
-The final image should be ${1920}x${1080 * panelCount} pixels total.
+      const panelDescriptions = panelPrompts.map((p: string, i: number) => `PAINEL ${i + 1}: ${p}`).join('\n');
+      textPrompt = `REQUISITO ABSOLUTO: Crie UMA ÚNICA imagem com ${panelCount} painéis empilhados VERTICALMENTE.
+Cada painel tem proporção 16:9. Separe os painéis com uma linha horizontal branca fina (4px).
+A imagem final deve ter ${1920}x${1080 * panelCount} pixels no total.
 
-CRITICAL LANGUAGE RULE: ALL visible text in the image MUST be in Brazilian Portuguese (PT-BR). NEVER use English text.
-ANTI-NARRATION TEXT RULE: NEVER transcribe full narration sentences into the image. Maximum 1-4 visible words per panel (titles, labels, numeric values only).
-ACRONYM RULE: Use correct abbreviated form of acronyms, never spell them phonetically.
-COMPOSITION RULE: Main element centered occupying 60-70% of each panel frame.
-${activeStyle}
-NEVER include brand names, channel names, or logos.
+REGRA CRÍTICA DE IDIOMA: TODO texto visível DEVE estar em Português Brasileiro (PT-BR). NUNCA use texto em inglês.
+REGRA ANTI-NARRAÇÃO: NUNCA transcreva frases completas da narração na imagem. Máximo 1-4 palavras visíveis por painel (títulos, rótulos, valores numéricos apenas).
+REGRA DE ACRÔNIMOS: Use a forma abreviada correta dos acrônimos, nunca soletrados foneticamente.
+REGRA DE COMPOSIÇÃO: Elemento principal centralizado ocupando 60-70% de cada painel.
+ESTILO: ${activeStyle}
+NUNCA inclua nomes de marcas, canais ou logos.
 ${assetBlock}
-
+${antiRepetitionBlock}
 ${panelDescriptions}`;
     } else {
-      textPrompt = `ABSOLUTE REQUIREMENT: Aspect ratio 16:9 (1920x1080 widescreen).
-CRITICAL LANGUAGE RULE: ALL visible text in the image MUST be in Brazilian Portuguese (PT-BR). NEVER use English text.
-ANTI-NARRATION TEXT RULE: NEVER transcribe full narration sentences into the image. Maximum 1-4 visible words (titles, labels, numeric values only).
-ACRONYM RULE: Use correct abbreviated form of acronyms, never spell them phonetically.
-COMPOSITION RULE: Main element centered occupying 60-70% of the frame. Supporting context at the edges.
-${activeStyle}
-NEVER include brand names, channel names, or logos.
+      textPrompt = `REQUISITO ABSOLUTO: Proporção exata 16:9 (1920x1080 widescreen).
+REGRA CRÍTICA DE IDIOMA: TODO texto visível DEVE estar em Português Brasileiro (PT-BR). NUNCA use texto em inglês.
+REGRA ANTI-NARRAÇÃO: NUNCA transcreva frases completas da narração na imagem. Máximo 1-4 palavras visíveis (títulos, rótulos, valores numéricos apenas).
+REGRA DE ACRÔNIMOS: Use a forma abreviada correta dos acrônimos, nunca soletrados foneticamente.
+REGRA DE COMPOSIÇÃO: Elemento principal centralizado ocupando 60-70% do frame. Contexto de suporte nas bordas.
+ESTILO: ${activeStyle}
+NUNCA inclua nomes de marcas, canais ou logos.
 ${assetBlock}
-Scene: ${imagePrompt}`;
+${antiRepetitionBlock}
+${visualFocus ? visualFocus + '\n' : ''}
+${cameraAngle ? cameraAngle + '\n' : ''}
+${subSceneLabel}Cena: ${imagePrompt}`;
     }
 
     // Build multimodal content parts
@@ -169,7 +237,7 @@ Scene: ${imagePrompt}`;
 
     // Fetch asset images as base64 inline data
     if (assetImageUrls && Array.isArray(assetImageUrls)) {
-      const urls = assetImageUrls.filter((u: unknown) => u && typeof u === 'string').slice(0, 5);
+      const urls = assetImageUrls.filter((u: unknown) => u && typeof u === 'string').slice(0, 8);
       for (const url of urls) {
         const result = await fetchAssetAsBase64(url as string);
         if (result) {
