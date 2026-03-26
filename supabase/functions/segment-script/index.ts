@@ -5,6 +5,46 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function repairJson(json: string): string {
+  let braces = 0, brackets = 0;
+  for (const c of json) {
+    if (c === '{') braces++;
+    if (c === '}') braces--;
+    if (c === '[') brackets++;
+    if (c === ']') brackets--;
+  }
+  let r = json;
+  while (brackets > 0) { r += ']'; brackets--; }
+  while (braces > 0) { r += '}'; braces--; }
+  return r
+    .replace(/,\s*}/g, "}")
+    .replace(/,\s*]/g, "]")
+    .replace(/[\x00-\x1F\x7F]/g, "");
+}
+
+function extractAndParseJson(content: string): unknown {
+  // 1. Direct parse
+  try { return JSON.parse(content); } catch { /* continue */ }
+
+  // 2. Extract from markdown code block
+  const codeBlock = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlock) {
+    try { return JSON.parse(codeBlock[1].trim()); } catch { /* continue */ }
+  }
+
+  // 3. Find JSON object in mixed text
+  const jsonMatch = content.match(/\{[\s\S]*"[^"]+"\s*:[\s\S]*\}/);
+  if (jsonMatch) {
+    try { return JSON.parse(jsonMatch[0]); } catch { /* continue */ }
+    try { return JSON.parse(repairJson(jsonMatch[0])); } catch { /* continue */ }
+  }
+
+  // 4. Last resort: repair entire content
+  try { return JSON.parse(repairJson(content)); } catch { /* continue */ }
+
+  throw new Error("Could not extract valid JSON from Gemini response");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -62,7 +102,7 @@ Responda APENAS com um JSON válido no formato:
 
     const result = await response.json();
     const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-    const parsed = JSON.parse(text);
+    const parsed = extractAndParseJson(text);
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
