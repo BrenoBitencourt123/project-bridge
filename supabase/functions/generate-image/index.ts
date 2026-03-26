@@ -125,6 +125,20 @@ async function callImageAIWithFallback(
       }
 
       const result = await response.json();
+
+      // Check for embedded errors (429/rate-limit returned inside a 200 response)
+      const choiceError = result.choices?.[0]?.error;
+      if (choiceError) {
+        const code = choiceError.code || choiceError.status;
+        const errType = choiceError.metadata?.error_type || '';
+        if (code === 429 || errType === 'rate_limit_exceeded') {
+          console.warn(`Embedded 429 in response from ${model}, trying fallback...`);
+          throw new Error("Embedded rate limit in response");
+        }
+        console.warn(`Embedded error in response from ${model}: ${JSON.stringify(choiceError)}`);
+        throw new Error(`Embedded error: ${choiceError.message || 'unknown'}`);
+      }
+
       const base64Data = extractBase64FromResponse(result);
       if (!base64Data) {
         console.error("No image in response:", JSON.stringify(result).slice(0, 2000));
