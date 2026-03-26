@@ -19,10 +19,11 @@ const CAMERA_ANGLES: Record<SubPosition, string> = {
 };
 
 function getSubSceneCount(wordCount: number): number {
-  if (wordCount < 25) return 1;
-  if (wordCount < 50) return 2;
-  if (wordCount < 75) return 3;
-  return 4;
+  if (wordCount < 30) return 1;
+  if (wordCount < 55) return 2;
+  if (wordCount < 80) return 3;
+  if (wordCount < 110) return 4;
+  return 5;
 }
 
 function derivePosition(subIndex: number, total: number): SubPosition {
