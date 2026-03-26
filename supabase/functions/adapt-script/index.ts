@@ -27,17 +27,25 @@ function repairJson(json: string): string {
 }
 
 function extractAndParseJson(content: string): unknown {
-  try { return JSON.parse(content); } catch { /* continue */ }
-  const codeBlock = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlock) {
-    try { return JSON.parse(codeBlock[1].trim()); } catch { /* continue */ }
+  // Strip markdown code fences
+  let cleaned = content
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
+    .trim();
+
+  // Try direct parse
+  try { return JSON.parse(cleaned); } catch { /* continue */ }
+
+  // Find JSON boundaries
+  const jsonStart = cleaned.search(/\{/);
+  if (jsonStart !== -1) {
+    const candidate = cleaned.substring(jsonStart);
+    try { return JSON.parse(candidate); } catch { /* continue */ }
+    try { return JSON.parse(repairJson(candidate)); } catch { /* continue */ }
   }
-  const jsonMatch = content.match(/\{[\s\S]*"[^"]+"\s*:[\s\S]*\}/);
-  if (jsonMatch) {
-    try { return JSON.parse(jsonMatch[0]); } catch { /* continue */ }
-    try { return JSON.parse(repairJson(jsonMatch[0])); } catch { /* continue */ }
-  }
-  try { return JSON.parse(repairJson(content)); } catch { /* continue */ }
+
+  // Last resort: repair entire content
+  try { return JSON.parse(repairJson(cleaned)); } catch { /* continue */ }
   throw new Error("Não foi possível extrair JSON válido da resposta da IA");
 }
 
@@ -61,7 +69,7 @@ async function callAIWithFallback(
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ model, messages, temperature, max_tokens: 8192 }),
+        body: JSON.stringify({ model, messages, temperature, max_tokens: 16384 }),
         signal: controller.signal,
       });
 
