@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2, MoreVertical } from 'lucide-react';
+import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2, MoreVertical, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
@@ -13,6 +13,8 @@ import { AssetReferenceSelector, type AssetReference } from './AssetReferenceSel
 import { CostEstimateCard } from './CostEstimateCard';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { MOMENT_TYPE_CONFIG } from '@/types/atlas';
 import type { Alignment } from '@/types/atlas';
 
@@ -82,6 +84,8 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [stylePrefix, setStylePrefix] = useState<string>('');
   const [styleName, setStyleName] = useState<string>('');
   const [selectedAssets, setSelectedAssets] = useState<AssetReference[]>([]);
+  const [selectedSubScene, setSelectedSubScene] = useState<{ segment: Segment; subScene: SubScene } | null>(null);
+  const [editingPrompt, setEditingPrompt] = useState('');
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
@@ -497,6 +501,113 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         )}
       </div>
 
+      {/* Sub-scene detail modal */}
+      <Dialog open={!!selectedSubScene} onOpenChange={(open) => { if (!open) setSelectedSubScene(null); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          {selectedSubScene && (() => {
+            const { segment: modalSeg, subScene: modalSc } = selectedSubScene;
+            // Get latest data from segments state
+            const liveSeg = segments.find(s => s.id === modalSeg.id) || modalSeg;
+            const liveSc = (liveSeg.sub_scenes || []).find(s => s.id === modalSc.id) || modalSc;
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="text-sm">
+                    Bloco {String(liveSeg.sequence_number).padStart(3, '0')} — Sub-cena {liveSc.sub_index}
+                  </DialogTitle>
+                </DialogHeader>
+
+                {/* Image */}
+                <div className="aspect-video bg-muted/30 rounded-md overflow-hidden relative">
+                  {liveSc.image_url ? (
+                    <img src={liveSc.image_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                      Sem imagem
+                    </div>
+                  )}
+                  {liveSc.image_status === 'generating' && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                      <Loader2 className="animate-spin h-6 w-6 text-white" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Narração */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Narração</label>
+                  <p className="text-sm mt-1 p-2 rounded bg-muted/30 border">{liveSc.narration_segment}</p>
+                </div>
+
+                {/* Simbolismo do bloco */}
+                {liveSeg.symbolism && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">Simbolismo do bloco</label>
+                    <p className="text-sm mt-1 p-2 rounded bg-muted/30 border">{liveSeg.symbolism}</p>
+                  </div>
+                )}
+
+                {/* Prompt editável */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                    <Pencil className="h-3 w-3" /> Prompt da imagem
+                  </label>
+                  <Textarea
+                    className="mt-1 text-sm min-h-[80px]"
+                    value={editingPrompt}
+                    onChange={(e) => setEditingPrompt(e.target.value)}
+                  />
+                </div>
+
+                {/* Áudio */}
+                {liveSc.audio_url && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">Áudio</label>
+                    <audio controls src={liveSc.audio_url} className="w-full mt-1" />
+                  </div>
+                )}
+
+                <DialogFooter className="gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={editingPrompt === (liveSc.image_prompt || '')}
+                    onClick={async () => {
+                      updateSubSceneInSegments(liveSeg.id, liveSc.id, { image_prompt: editingPrompt });
+                      await supabase.from('sub_scenes').update({ image_prompt: editingPrompt }).eq('id', liveSc.id);
+                      toast({ title: 'Prompt salvo!' });
+                    }}
+                  >
+                    Salvar Prompt
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={liveSc.image_status === 'generating'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Save prompt first if changed
+                      if (editingPrompt !== (liveSc.image_prompt || '')) {
+                        updateSubSceneInSegments(liveSeg.id, liveSc.id, { image_prompt: editingPrompt });
+                        supabase.from('sub_scenes').update({ image_prompt: editingPrompt }).eq('id', liveSc.id);
+                      }
+                      handleGenerateSingleImage(liveSeg, { ...liveSc, image_prompt: editingPrompt });
+                    }}
+                  >
+                    {liveSc.image_status === 'generating' ? (
+                      <><Loader2 className="animate-spin h-3 w-3 mr-1" /> Gerando...</>
+                    ) : liveSc.image_url ? (
+                      <><RefreshCw className="h-3 w-3 mr-1" /> Refazer Imagem</>
+                    ) : (
+                      <><Image className="h-3 w-3 mr-1" /> Gerar Imagem</>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       {/* Sub-scenes grid view per segment */}
       <div className="space-y-4">
         {segments.map((seg) => {
@@ -518,7 +629,11 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
                 {subScenes.map((sc) => {
                   const isGenThisOne = genSubSceneId === sc.id;
                   return (
-                    <div key={sc.id} className="rounded-md border border-border/50 bg-background overflow-hidden">
+                    <div
+                      key={sc.id}
+                      className="rounded-md border border-border/50 bg-background overflow-hidden cursor-pointer hover:ring-1 hover:ring-primary/50 transition-all"
+                      onClick={() => { setSelectedSubScene({ segment: seg, subScene: sc }); setEditingPrompt(sc.image_prompt || ''); }}
+                    >
                       {/* Image area */}
                       <div className="aspect-video bg-muted/50 relative group">
                         {sc.image_status === 'generating' && (
