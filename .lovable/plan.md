@@ -1,28 +1,22 @@
 
 
-# Adicionar Modal de Detalhes ao Clicar na Sub-cena
+# Simplificar geração de imagens: 1 imagem por sub-cena
 
 ## Problema
-Atualmente, na grade de sub-cenas do MediaStep, não é possível ver o prompt da imagem nem editá-lo sem expandir o SegmentCard da etapa de Segmentos. O usuário quer clicar em qualquer card de sub-cena e ver/editar o prompt em um modal.
+O modo de painéis empilhados (2-3 sub-cenas numa única imagem + recorte via Canvas) prejudica a qualidade das imagens individuais.
 
 ## Solução
-Adicionar um **Dialog/Modal** que abre ao clicar no card da sub-cena na grade do `MediaStep.tsx`. O modal mostra:
-
-- **Imagem gerada** (se existir)
-- **Prompt da imagem** (editável via Textarea)
-- **Narração** da sub-cena (somente leitura)
-- **Simbolismo** do bloco pai (somente leitura)
-- Botão para **Gerar/Refazer** imagem direto do modal
+Remover toda a lógica de painéis e sempre gerar 1 imagem por sub-cena individualmente.
 
 ## Arquivos alterados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/pipeline/MediaStep.tsx` | Adicionar estado para sub-cena selecionada + Dialog com detalhes e edição de prompt. Ao clicar no card da sub-cena, abre o modal em vez de nada. |
+| `src/components/pipeline/MediaStep.tsx` | Remover função `cropPanelsFromImage`, remover `uploadCroppedPanel`, simplificar `handleGenerateAllImages` para sempre chamar `generateSingleSubSceneImage` para cada sub-cena pendente (sem branch de panel mode) |
+| `supabase/functions/generate-image/index.ts` | Remover parâmetros `panelCount`/`panelPrompts`, remover branch de panel mode no prompt, remover sufixo `-panels` no filename. Manter apenas o modo single 16:9 |
 
 ## Detalhes técnicos
-- Usar o componente `Dialog` já existente em `src/components/ui/dialog.tsx`
-- Estado: `selectedSubScene: { segment: Segment, subScene: SubScene } | null`
-- Ao salvar edição do prompt no modal, atualizar via `updateSubSceneInSegments` (já existe)
-- Botão "Gerar Imagem" no modal chama `handleGenerateSingleImage` existente
+- No `MediaStep.tsx`, o loop em `handleGenerateAllImages` passa a ser simples: para cada segmento, itera todas sub-cenas pendentes chamando `generateSingleSubSceneImage` com anti-repetição acumulada
+- Na edge function, remove-se o bloco `isPanelMode` do prompt e a resposta sempre retorna `isPanelImage: false`
+- ~20 linhas removidas no frontend, ~15 na edge function
 
