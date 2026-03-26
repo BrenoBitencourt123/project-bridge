@@ -116,7 +116,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             body: {
               imagePrompt: sc.image_prompt, projectId: project.id, segmentId: seg.id,
               sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
-              stylePrefix, assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
+              stylePrefix,
+              assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
+              assetImageUrls: selectedAssets.map(a => a.image_url),
             },
           });
           if (error) throw error;
