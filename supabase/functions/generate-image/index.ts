@@ -90,7 +90,6 @@ async function fetchAssetAsBase64(url: string): Promise<{ b64: string; contentTy
 async function callImageAIWithFallback(
   apiKey: string,
   contentParts: any[],
-  panelCount?: number
 ): Promise<any> {
   const models = [PRIMARY_MODEL, FALLBACK_MODEL];
 
@@ -100,7 +99,7 @@ async function callImageAIWithFallback(
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      console.log(`Trying image model: ${model}${panelCount ? ` (${panelCount} panels)` : ''}`);
+      console.log(`Trying image model: ${model}`);
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
