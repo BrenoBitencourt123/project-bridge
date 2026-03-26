@@ -35,39 +35,6 @@ function deriveSubPosition(subIndex: number, total: number): string {
   return 'middle';
 }
 
-/** Crop a panel image into N equal vertical slices using Canvas */
-async function cropPanelsFromImage(imageUrl: string, panelCount: number): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const panelHeight = Math.floor(img.height / panelCount);
-      const results: string[] = [];
-      for (let i = 0; i < panelCount; i++) {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = panelHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { reject(new Error('Canvas context failed')); return; }
-        ctx.drawImage(img, 0, i * panelHeight, img.width, panelHeight, 0, 0, img.width, panelHeight);
-        results.push(canvas.toDataURL('image/png'));
-      }
-      resolve(results);
-    };
-    img.onerror = () => reject(new Error('Failed to load panel image'));
-    img.src = imageUrl;
-  });
-}
-
-/** Convert a data URL to a Blob */
-function dataUrlToBlob(dataUrl: string): Blob {
-  const [header, b64] = dataUrl.split(',');
-  const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
-  const bytes = atob(b64);
-  const arr = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-  return new Blob([arr], { type: mime });
-}
 
 export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange }: MediaStepProps) {
   const { toast } = useToast();

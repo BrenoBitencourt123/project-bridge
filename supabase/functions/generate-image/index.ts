@@ -164,7 +164,6 @@ serve(async (req) => {
       subIndex, subPosition, totalSubScenes, alreadyIllustrated,
       momentType, styleName, stylePrefix,
       assetDescriptions, assetImageUrls,
-      panelCount, panelPrompts,
     } = await req.json();
 
     if (!imagePrompt || !projectId) throw new Error("imagePrompt and projectId required");
@@ -212,27 +211,8 @@ serve(async (req) => {
       ? `[${posLabels[subPosition] || subPosition.toUpperCase()} — sub-cena ${subIndex} de ${totalSubScenes}] `
       : '';
 
-    // Build the text prompt — support panel mode
-    let textPrompt: string;
-    const isPanelMode = panelCount && panelCount > 1 && panelPrompts && Array.isArray(panelPrompts);
-
-    if (isPanelMode) {
-      const panelDescriptions = panelPrompts.map((p: string, i: number) => `PAINEL ${i + 1}: ${p}`).join('\n');
-      textPrompt = `REQUISITO ABSOLUTO: Crie UMA ÚNICA imagem com ${panelCount} painéis empilhados VERTICALMENTE.
-Cada painel tem proporção 16:9. Separe os painéis com uma linha horizontal branca fina (4px).
-A imagem final deve ter ${1920}x${1080 * panelCount} pixels no total.
-
-REGRA CRÍTICA DE IDIOMA: TODO texto visível DEVE estar em Português Brasileiro (PT-BR). NUNCA use texto em inglês.
-REGRA ANTI-NARRAÇÃO: NUNCA transcreva frases completas da narração na imagem. Máximo 1-4 palavras visíveis por painel (títulos, rótulos, valores numéricos apenas).
-REGRA DE ACRÔNIMOS: Use a forma abreviada correta dos acrônimos, nunca soletrados foneticamente.
-REGRA DE COMPOSIÇÃO: Elemento principal centralizado ocupando 60-70% de cada painel.
-ESTILO: ${activeStyle}
-NUNCA inclua nomes de marcas, canais ou logos.
-${assetBlock}
-${antiRepetitionBlock}
-${panelDescriptions}`;
-    } else {
-      textPrompt = `REQUISITO ABSOLUTO: Proporção exata 16:9 (1920x1080 widescreen).
+    // Build the text prompt — always single image mode
+    const textPrompt = `REQUISITO ABSOLUTO: Proporção exata 16:9 (1920x1080 widescreen).
 REGRA CRÍTICA DE IDIOMA: TODO texto visível DEVE estar em Português Brasileiro (PT-BR). NUNCA use texto em inglês.
 REGRA ANTI-NARRAÇÃO: NUNCA transcreva frases completas da narração na imagem. Máximo 1-4 palavras visíveis (títulos, rótulos, valores numéricos apenas).
 REGRA DE ACRÔNIMOS: Use a forma abreviada correta dos acrônimos, nunca soletrados foneticamente.
@@ -244,7 +224,6 @@ ${antiRepetitionBlock}
 ${visualFocus ? visualFocus + '\n' : ''}
 ${cameraAngle ? cameraAngle + '\n' : ''}
 ${subSceneLabel}Cena: ${imagePrompt}`;
-    }
 
     // Build multimodal content parts
     const contentParts: any[] = [{ type: "text", text: textPrompt }];
@@ -264,13 +243,12 @@ ${subSceneLabel}Cena: ${imagePrompt}`;
     }
 
     // Call AI with fallback
-    const base64Data = await callImageAIWithFallback(LOVABLE_API_KEY, contentParts, isPanelMode ? panelCount : undefined);
+    const base64Data = await callImageAIWithFallback(LOVABLE_API_KEY, contentParts);
 
     const imageBytes = base64Decode(base64Data);
     const num = String(sequenceNumber).padStart(3, "0");
     const subSuffix = subIndex ? `-sub-${subIndex}` : "";
-    const panelSuffix = isPanelMode ? "-panels" : "";
-    const fileName = `${projectId}/segment-${num}${subSuffix}${panelSuffix}.png`;
+    const fileName = `${projectId}/segment-${num}${subSuffix}.png`;
 
     const { error: uploadErr } = await supabase.storage
       .from("segment-images")
@@ -281,8 +259,6 @@ ${subSceneLabel}Cena: ${imagePrompt}`;
 
     return new Response(JSON.stringify({
       imageUrl: urlData.publicUrl + `?t=${Date.now()}`,
-      isPanelImage: !!isPanelMode,
-      panelCount: isPanelMode ? panelCount : 1,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
