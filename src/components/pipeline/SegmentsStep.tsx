@@ -26,11 +26,28 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
     if (!project.raw_script) return;
     setSegmenting(true);
     try {
-      // Parsing local por parágrafos — sem chamada à IA
-      const paragraphs = project.raw_script
+      // Parsing local — agrupa parágrafos até ~80-100 palavras por bloco
+      const rawParagraphs = project.raw_script
         .split(/\n\n+/)
         .map(p => p.trim())
         .filter(p => p.length > 0);
+
+      const TARGET_WORDS = 90;
+      const paragraphs: string[] = [];
+      let buffer = '';
+      let bufferWords = 0;
+      for (const p of rawParagraphs) {
+        const pWords = p.split(/\s+/).length;
+        if (buffer && bufferWords + pWords > TARGET_WORDS * 1.2) {
+          paragraphs.push(buffer);
+          buffer = p;
+          bufferWords = pWords;
+        } else {
+          buffer = buffer ? `${buffer}\n\n${p}` : p;
+          bufferWords += pWords;
+        }
+      }
+      if (buffer) paragraphs.push(buffer);
 
       // Deletar sub-cenas e segmentos existentes
       const existingSegmentIds = segments.map(s => s.id);

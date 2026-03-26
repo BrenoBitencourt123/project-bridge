@@ -208,7 +208,7 @@ Regras obrigatórias:
 - Não adicione conteúdo novo.
 - Não remova ideias do texto.
 - Não resuma demais.
-- Divida em blocos de 30 a 90 palavras.
+- Divida em blocos de 60 a 120 palavras. Gere entre 20 e 35 blocos no total.
 - Calcule timestamps sequenciais usando 1 palavra ≈ 0.4 segundos.
 - O campo "narration" deve conter apenas o texto falado do bloco.
 - O campo "visual" deve ser em português, concreto, claro e útil para orientar edição/geração visual.
