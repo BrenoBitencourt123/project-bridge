@@ -1,61 +1,68 @@
 
 
-# Plano de Otimizacao: Segmentacao, Assets e UI do MediaStep
+# Plano: Alinhar Sistema com Referência Atlas-new-creators
 
-## Problemas identificados
+## Diferenças Principais Identificadas
 
-1. **Assets nao influenciam as imagens**: Os assets sao selecionados no MediaStep, mas a selecao comeca vazia a cada render. Alem disso, o bloco CTA do roteiro ("curtir e se inscrever") gera 3-4 sub-cenas com imagens desnecessarias de "like/subscribe".
+| Aspecto | Nosso Sistema Atual | Referência Atlas-new-creators |
+|---|---|---|
+| **Edge Functions de IA** | 3 separadas (`generate-script`, `segment-script`, `regenerate-prompts`) usando `GOOGLE_AI_API_KEY` | 1 unificada (`ai-content`) usando `LOVABLE_API_KEY` com fallback + timeout handling |
+| **Geração de Imagem** | Salva no Storage, retorna URL pública | Retorna `data:base64` direto, sem Storage (front-end gerencia) |
+| **Imagem: reference images** | Usa `assetDescriptions` (texto) | Envia **imagens reais** como `image_url` parts no request |
+| **Imagem: estilos** | Estilo fixo (sketch azul) | Múltiplos estilos selecionáveis (sketch laranja, impacto/comic, limpo, vibrant) |
+| **Imagem: panels** | 1 imagem por sub-cena | Modo `single` gera 1 imagem com 2-3 painéis empilhados verticalmente (depois recorta) |
+| **Segmentação** | IA retorna blocos com `momentType` + `maxSubScenes` | IA retorna `video_script[]` com `{time, narration, visual}` — sem momentType |
+| **Sub-cenas** | Mesma lógica de faixas de palavras (idêntica) | Mesma lógica (<25→1, <50→2, <75→3, 75+→4) |
+| **Áudio** | ElevenLabs `with-timestamps` + split por sub-cena | ElevenLabs individual por sub-cena (1 request por audio) |
+| **Model fallback** | Nenhum | Retry automático com modelo fallback + timeout handling |
 
-2. **Segmentacao gera sub-cenas demais**: O `split-sub-scenes.ts` divide puramente por contagem de palavras sem considerar o `momentType`. Blocos CTA com 100+ palavras geram 4 sub-cenas (4 imagens), quando 1 bastaria.
+## O que faz sentido adotar
 
-3. **UI do MediaStep confusa**: Muitos botoes no topo, cards expandiveis com campos repetidos (prompt do bloco + prompt de cada sub-cena), informacao visual poluida.
+### 1. Migrar `generate-script` e `regenerate-prompts` para Lovable AI Gateway
+- Elimina uso da `GOOGLE_AI_API_KEY` em **todas** as edge functions de texto
+- Custo zero para o usuário em geração de roteiro, segmentação e prompts
+- Adicionar timeout handling e model fallback como na referência
 
-4. **segment-script usa GOOGLE_AI_API_KEY diretamente**: Nao usa o Lovable AI Gateway. A referencia Atlas-new-creators usa `LOVABLE_API_KEY` via gateway para tudo exceto TTS.
+### 2. Melhorar `generate-image` com referência de imagens reais (não só texto)
+- Atualmente os assets são enviados como **descrições textuais** — a IA não vê as imagens
+- Na referência, as imagens dos assets são enviadas como `image_url` parts no request
+- Isso é o motivo dos assets "não influenciarem" as imagens geradas
+- Implementar: buscar a URL real do asset e enviar como `image_url` no multimodal request
 
-## Plano de implementacao
+### 3. Adicionar estilos de imagem selecionáveis
+- Atual: estilo fixo (sketch azul em papel bege)
+- Referência: 4 estilos — sketch (laranja), impacto/comic, limpo, vibrant
+- Permitir ao usuário escolher o estilo no `StyleTemplateSelector`
 
-### 1. Migrar `segment-script` para Lovable AI Gateway
-- Trocar a chamada `generativelanguage.googleapis.com` por `ai.gateway.lovable.dev/v1/chat/completions`
-- Usar `LOVABLE_API_KEY` em vez de `GOOGLE_AI_API_KEY`
-- Manter o prompt e a logica de parsing JSON
-- Resultado: elimina custo do Gemini na sua chave para segmentacao
+### 4. Adicionar timeout + fallback nos requests de IA
+- Referência usa AbortController com deadline de 50-55s
+- Se o modelo primário falha, tenta um modelo fallback (gemini-2.5-flash)
+- Previne edge functions travando por timeout silencioso
 
-### 2. Ajustar prompt de segmentacao para blocos inteligentes
-- Adicionar regra no prompt: **blocos de CTA devem ser um unico bloco curto** (nao fragmentar em multiplas sub-cenas)
-- Adicionar regra: **imagePrompt de blocos CTA deve ser generico** ("tela com botoes de curtir e se inscrever" - 1 imagem so)
-- Adicionar campo `maxSubScenes` na resposta do Gemini para que o segmentador sugira quantas sub-cenas cada bloco precisa
+### 5. **NÃO** mudar a segmentação
+- A lógica de sub-cenas por faixas de palavras é **idêntica** nas duas bases
+- O `momentType` + `maxSubScenes` que adicionamos é uma **melhoria** sobre a referência (que não tem)
+- Manter como está
 
-### 3. Tornar `split-sub-scenes` ciente do momentType
-- Receber `momentType` como parametro
-- Blocos `cta` e `hook`: forcam **maximo 1 sub-cena** (nao precisa de multiplas imagens)
-- Blocos `concept`, `example`, `list_summary`: manter logica atual (1-4 sub-cenas por tamanho)
-- Isso resolve diretamente o problema de 3 imagens de "curtir e se inscrever"
+### 6. **NÃO** mudar o fluxo de áudio
+- Nosso sistema gera 1 áudio completo e fatia por timestamps — mais eficiente e natural
+- A referência gera 1 request por sub-cena — mais caro e com cortes menos naturais
+- Manter como está
 
-### 4. Simplificar a UI do MediaStep
-- **HUD compacto**: Unir os botoes em um dropdown menu ("Acoes") em vez de 4 botoes inline
-- **SegmentCard simplificado**: No modo media, mostrar apenas as sub-cenas com imagem + player de audio, escondendo o prompt base do bloco (que ja foi processado)
-- **Grid de imagens**: Mostrar as imagens das sub-cenas em grid (2-3 colunas) em vez de lista vertical, facilitando visualizacao rapida do video
-- **Barra de progresso unificada**: Uma unica barra com cores (azul = imagens, verde = audios) em vez de duas separadas
+## Arquivos Alterados
 
-### 5. Atualizar CostEstimateCard
-- Remover linhas de custo Gemini (Script, Segmentar, Prompts) ja que serao todos via Lovable AI Gateway (custo zero)
-- Manter apenas: ElevenLabs (audio) e Whisper (transcricao) como custos do usuario
-
-## Arquivos alterados
-
-| Arquivo | Mudanca |
+| Arquivo | Mudança |
 |---|---|
-| `supabase/functions/segment-script/index.ts` | Migrar para Lovable AI Gateway + ajustar prompt |
-| `src/lib/split-sub-scenes.ts` | Receber momentType, limitar sub-cenas por tipo |
-| `src/components/pipeline/SegmentsStep.tsx` | Passar momentType para splitIntoSubScenes |
-| `src/components/pipeline/MediaStep.tsx` | Redesign da UI: dropdown de acoes, grid de imagens |
-| `src/components/pipeline/SegmentCard.tsx` | Simplificar visual no modo media |
-| `src/components/pipeline/CostEstimateCard.tsx` | Remover custos Gemini, atualizar layout |
+| `supabase/functions/generate-script/index.ts` | Migrar para Lovable AI Gateway + adicionar timeout/fallback |
+| `supabase/functions/regenerate-prompts/index.ts` | Migrar para Lovable AI Gateway + adicionar timeout/fallback |
+| `supabase/functions/generate-image/index.ts` | Enviar imagens reais dos assets (não só texto) + adicionar estilos |
+| `src/components/pipeline/MediaStep.tsx` | Passar URLs dos assets (não só descrições) para generate-image |
+| `src/components/pipeline/AssetReferenceSelector.tsx` | Incluir `image_url` nos assets selecionados |
+| `src/components/pipeline/CostEstimateCard.tsx` | Atualizar: todas as etapas de texto agora são custo zero |
 
-## Resultado esperado
-- Video de 8 min: ~20-30 imagens (em vez de 60+)
-- Blocos CTA/Hook geram apenas 1 imagem
-- UI mais limpa e facil de navegar
-- Custo zero de Gemini (tudo via Lovable AI)
-- Assets selecionados continuam sendo injetados no prompt de cada imagem
+## Resultado Esperado
+- **Custo zero** em todas as chamadas de IA de texto (roteiro, segmentação, prompts)
+- **Assets realmente influenciam** as imagens (enviados como imagens, não texto)
+- **Resiliência**: timeout + fallback evita erros silenciosos
+- Custos do usuário: apenas ElevenLabs (áudio) e Whisper (transcrição)
 
