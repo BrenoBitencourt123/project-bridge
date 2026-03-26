@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Download, Image, Volume2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Segment } from '@/types/atlas';
+import { CostEstimateCard } from './CostEstimateCard';
 import JSZip from 'jszip';
 
 interface ExportStepProps {
@@ -108,6 +109,11 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
           );
         })}
       </div>
+
+      <CostEstimateCard
+        charCount={allSubScenes.reduce((sc_sum, sc) => sc_sum + (sc.narration_segment?.length || 0), 0)}
+        subSceneCount={allSubScenes.length}
+      />
 
       <Button className="w-full" size="lg" onClick={handleDownload} disabled={downloading || totalFiles === 0}>
         {downloading ? <Loader2 className="animate-spin" /> : <Download className="h-4 w-4" />}

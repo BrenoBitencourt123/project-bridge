@@ -11,6 +11,7 @@ import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio
 import { findSubSceneCutPoints } from '@/lib/find-cut-points';
 import { AudioImportDialog } from './AudioImportDialog';
 import { AssetReferenceSelector, type AssetReference } from './AssetReferenceSelector';
+import { CostEstimateCard } from './CostEstimateCard';
 import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
@@ -371,6 +372,11 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             <Progress value={totalSubScenes > 0 ? (subAudiosDone / totalSubScenes) * 100 : 0} className="mt-1" />
           </div>
         </div>
+        <CostEstimateCard
+          wordCount={project.raw_script?.trim().split(/\s+/).length || 0}
+          charCount={allSubScenes.reduce((sum, sc) => sum + (sc.narration_segment?.length || 0), 0)}
+          subSceneCount={totalSubScenes}
+        />
         {statusText && <p className="text-xs text-muted-foreground">{statusText}</p>}
         {allDone && (
           <Button className="w-full" onClick={onNext}>
