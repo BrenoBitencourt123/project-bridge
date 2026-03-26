@@ -5,6 +5,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const TIMEOUT_MS = 55_000;
+const PRIMARY_MODEL = "google/gemini-2.5-flash";
+const FALLBACK_MODEL = "google/gemini-2.5-flash-lite";
+
 function repairJson(json: string): string {
   let braces = 0, brackets = 0;
   for (const c of json) {
@@ -35,6 +39,55 @@ function extractAndParseJson(content: string): unknown {
   }
   try { return JSON.parse(repairJson(content)); } catch { /* continue */ }
   throw new Error("Could not extract valid JSON from AI response");
+}
+
+async function callAIWithFallback(
+  apiKey: string,
+  messages: { role: string; content: string }[],
+  temperature: number
+): Promise<any> {
+  const models = [PRIMARY_MODEL, FALLBACK_MODEL];
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+    try {
+      console.log(`Trying model: ${model}`);
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model, messages, temperature }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (response.status === 429) {
+        throw { status: 429, message: "Rate limit exceeded. Please try again later." };
+      }
+      if (response.status === 402) {
+        throw { status: 402, message: "Payment required. Please add funds to your Lovable AI workspace." };
+      }
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`AI Gateway error [${response.status}]: ${errText}`);
+      }
+
+      return await response.json();
+    } catch (e: any) {
+      clearTimeout(timer);
+      // If rate limit or payment error, propagate immediately
+      if (e?.status === 429 || e?.status === 402) throw e;
+      // If last model, propagate error
+      if (i === models.length - 1) throw e;
+      console.warn(`Model ${model} failed, trying fallback:`, e.message || e);
+    }
+  }
 }
 
 serve(async (req) => {
@@ -73,54 +126,40 @@ REGRAS ESPECIAIS POR TIPO DE MOMENTO:
   - Para "hook": sempre 1
   - Para outros tipos: entre 1 e 4, baseado na complexidade visual do conteúdo
 
+FORMATAÇÃO TTS (IMPORTANTE para narração por voz):
+- Escreva números por extenso na narração: "1000" → "mil", "25%" → "vinte e cinco por cento", "R$150" → "cento e cinquenta reais"
+- Siglas devem ser escritas foneticamente: "CDI" → "cedê i", "SELIC" → "selic", "PIB" → "pibê", "ENEM" → "enem"
+- Datas: "2026" → "dois mil e vinte e seis"
+- Frações: "1/4" → "um quarto", "3/5" → "três quintos"
+- NÃO altere o significado, apenas adapte a forma escrita para leitura em voz alta
+
 ROTEIRO:
 ${script}
 
 Responda APENAS com um JSON válido no formato:
 {"segments": [{"narration": "...", "imagePrompt": "...", "symbolism": "...", "momentType": "...", "maxSubScenes": 1}]}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "You are a JSON-only response bot. Always respond with valid JSON." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.3,
-      }),
-    });
+    const result = await callAIWithFallback(
+      LOVABLE_API_KEY,
+      [
+        { role: "system", content: "You are a JSON-only response bot. Always respond with valid JSON." },
+        { role: "user", content: prompt },
+      ],
+      0.3
+    );
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Payment required. Please add funds to your Lovable AI workspace." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const errText = await response.text();
-      throw new Error(`AI Gateway error [${response.status}]: ${errText}`);
-    }
-
-    const result = await response.json();
     const text = result.choices?.[0]?.message?.content || "{}";
     const parsed = extractAndParseJson(text);
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (e) {
+  } catch (e: any) {
     console.error("segment-script error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500,
+    const status = e?.status || 500;
+    const message = e?.message || (e instanceof Error ? e.message : "Unknown error");
+    return new Response(JSON.stringify({ error: message }), {
+      status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
