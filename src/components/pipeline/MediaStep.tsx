@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2 } from 'lucide-react';
+import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { Project, Segment, SubScene } from '@/types/atlas';
-import { SegmentCard } from './SegmentCard';
 import { StyleTemplateSelector } from './StyleTemplateSelector';
 import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
@@ -12,6 +11,9 @@ import { findSubSceneCutPoints } from '@/lib/find-cut-points';
 import { AudioImportDialog } from './AudioImportDialog';
 import { AssetReferenceSelector, type AssetReference } from './AssetReferenceSelector';
 import { CostEstimateCard } from './CostEstimateCard';
+import { Badge } from '@/components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { MOMENT_TYPE_CONFIG } from '@/types/atlas';
 import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
@@ -42,65 +44,36 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
   const subAudiosDone = allSubScenes.filter(sc => sc.audio_status === 'done').length;
   const totalSubScenes = allSubScenes.length;
-
   const allDone = subScenesDone === totalSubScenes && subAudiosDone === totalSubScenes && totalSubScenes > 0;
 
-  // Realtime subscription for sub_scenes progress
+  const totalProgress = totalSubScenes > 0 ? ((subScenesDone + subAudiosDone) / (totalSubScenes * 2)) * 100 : 0;
+
+  const isAnyGenerating = generatingImages || generatingAudios || regenerating || uploadingAudio;
+
   useEffect(() => {
     const segmentIds = segments.map(s => s.id);
     if (segmentIds.length === 0) return;
-
     const channel = supabase
       .channel(`sub-scenes-progress-${project.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'sub_scenes',
-        },
-        (payload) => {
-          const updated = payload.new as SubScene;
-          if (!segmentIds.includes(updated.segment_id)) return;
-          
-          onSegmentsChange(prev =>
-            prev.map(seg => {
-              if (seg.id !== updated.segment_id) return seg;
-              return {
-                ...seg,
-                sub_scenes: (seg.sub_scenes || []).map(sc =>
-                  sc.id === updated.id ? { ...sc, ...updated } : sc
-                ),
-              };
-            })
-          );
-        }
-      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sub_scenes' }, (payload) => {
+        const updated = payload.new as SubScene;
+        if (!segmentIds.includes(updated.segment_id)) return;
+        onSegmentsChange(prev =>
+          prev.map(seg => {
+            if (seg.id !== updated.segment_id) return seg;
+            return { ...seg, sub_scenes: (seg.sub_scenes || []).map(sc => sc.id === updated.id ? { ...sc, ...updated } : sc) };
+          })
+        );
+      })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [project.id, segments.map(s => s.id).join(',')]);
-
-  const updateSegment = (index: number, updates: Partial<Segment>) => {
-    onSegmentsChange(prev => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], ...updates };
-      return updated;
-    });
-  };
 
   const updateSubSceneInSegments = useCallback((segmentId: string, subSceneId: string, updates: Partial<SubScene>) => {
     onSegmentsChange(prev =>
       prev.map(seg => {
         if (seg.id !== segmentId) return seg;
-        return {
-          ...seg,
-          sub_scenes: (seg.sub_scenes || []).map(sc =>
-            sc.id === subSceneId ? { ...sc, ...updates } : sc
-          ),
-        };
+        return { ...seg, sub_scenes: (seg.sub_scenes || []).map(sc => sc.id === subSceneId ? { ...sc, ...updates } : sc) };
       })
     );
   }, [onSegmentsChange]);
@@ -134,27 +107,16 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     onGeneratingChange?.(true);
     setImageProgress(0);
     let done = 0;
-
     for (const seg of segments) {
-      const subScenes = seg.sub_scenes || [];
-      for (const sc of subScenes) {
-        if (sc.image_status === 'done') {
-          done++;
-          setImageProgress((done / totalSubScenes) * 100);
-          continue;
-        }
+      for (const sc of (seg.sub_scenes || [])) {
+        if (sc.image_status === 'done') { done++; setImageProgress((done / totalSubScenes) * 100); continue; }
         updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
         try {
           const { data, error } = await supabase.functions.invoke('generate-image', {
             body: {
-              imagePrompt: sc.image_prompt,
-              projectId: project.id,
-              segmentId: seg.id,
-              sequenceNumber: seg.sequence_number,
-              subIndex: sc.sub_index,
-              momentType: seg.moment_type,
-              stylePrefix,
-              assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
+              imagePrompt: sc.image_prompt, projectId: project.id, segmentId: seg.id,
+              sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
+              stylePrefix, assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
             },
           });
           if (error) throw error;
@@ -168,7 +130,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         setImageProgress((done / totalSubScenes) * 100);
       }
     }
-
     await supabase.from('projects').update({ status: 'images_done', updated_at: new Date().toISOString() }).eq('id', project.id);
     onUpdate({ status: 'images_done' });
     setGeneratingImages(false);
@@ -210,14 +171,11 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         body: { rawScript: project.raw_script, projectId: project.id },
       });
       if (error) throw error;
-
       setStatusText('Processando alinhamento...');
       const alignment: Alignment = data.isChunked
         ? mergeAlignments(data.chunks.map((c: any) => c.alignment))
         : data.alignment;
-
       const cutTimes = findSubSceneCutPoints(project.raw_script!, alignment, segments);
-
       setStatusText('Fatiando áudio por sub-cena...');
       let blobs: Blob[];
       if (data.isChunked) {
@@ -226,11 +184,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         const audioBytes = Uint8Array.from(atob(data.fullAudioBase64), c => c.charCodeAt(0));
         blobs = await splitAudioAtCutPoints(audioBytes.buffer, cutTimes);
       }
-
       setStatusText('Enviando áudios das sub-cenas...');
       const flatSubs = flattenSubScenes();
       await uploadSubSceneAudios(blobs, flatSubs);
-
       await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
       onUpdate({ status: 'audio_done' });
       toast({ title: 'Áudios gerados!' });
@@ -250,7 +206,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     try {
       const alignments: Alignment[] = [];
       const audioBuffers: ArrayBuffer[] = [];
-
       for (let i = 0; i < orderedFiles.length; i++) {
         setStatusText(`Transcrevendo parte ${i + 1} de ${orderedFiles.length}...`);
         const formData = new FormData();
@@ -260,25 +215,18 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         alignments.push(data.alignment);
         audioBuffers.push(await orderedFiles[i].arrayBuffer());
       }
-
       setStatusText('Processando alinhamento...');
       const mergedAlignment = mergeAlignments(alignments);
       const cutTimes = findSubSceneCutPoints(project.raw_script!, mergedAlignment, segments);
-
       setStatusText('Fatiando áudio por sub-cena...');
       const totalLength = audioBuffers.reduce((sum, b) => sum + b.byteLength, 0);
       const merged = new Uint8Array(totalLength);
       let offset = 0;
-      for (const buf of audioBuffers) {
-        merged.set(new Uint8Array(buf), offset);
-        offset += buf.byteLength;
-      }
+      for (const buf of audioBuffers) { merged.set(new Uint8Array(buf), offset); offset += buf.byteLength; }
       const blobs = await splitAudioAtCutPoints(merged.buffer, cutTimes);
-
       setStatusText('Enviando áudios das sub-cenas...');
       const flatSubs = flattenSubScenes();
       await uploadSubSceneAudios(blobs, flatSubs);
-
       await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
       onUpdate({ status: 'audio_done' });
       toast({ title: 'Áudios importados!' });
@@ -290,33 +238,22 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     }
   };
 
-  const handleGenerateSingleImage = async (segIndex: number, subSceneId?: string) => {
-    const seg = segments[segIndex];
-    if (!subSceneId) return;
-
-    const sc = seg.sub_scenes?.find(s => s.id === subSceneId);
-    if (!sc) return;
-
-    setGenSubSceneId(subSceneId);
-    updateSubSceneInSegments(seg.id, subSceneId, { image_status: 'generating' });
+  const handleGenerateSingleImage = async (seg: Segment, sc: SubScene) => {
+    setGenSubSceneId(sc.id);
+    updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
     try {
       const { data, error } = await supabase.functions.invoke('generate-image', {
         body: {
-          imagePrompt: sc.image_prompt,
-          projectId: project.id,
-          segmentId: seg.id,
-          sequenceNumber: seg.sequence_number,
-          subIndex: sc.sub_index,
-          momentType: seg.moment_type,
-          stylePrefix,
-          assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
+          imagePrompt: sc.image_prompt, projectId: project.id, segmentId: seg.id,
+          sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
+          stylePrefix, assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
         },
       });
       if (error) throw error;
-      updateSubSceneInSegments(seg.id, subSceneId, { image_url: data.imageUrl, image_status: 'done' });
-      await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', subSceneId);
+      updateSubSceneInSegments(seg.id, sc.id, { image_url: data.imageUrl, image_status: 'done' });
+      await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', sc.id);
     } catch {
-      updateSubSceneInSegments(seg.id, subSceneId, { image_status: 'error' });
+      updateSubSceneInSegments(seg.id, sc.id, { image_status: 'error' });
     } finally {
       setGenSubSceneId(null);
     }
@@ -324,60 +261,53 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
 
   return (
     <div className="space-y-4">
-      {/* HUD */}
+      {/* Compact HUD */}
       <div className="sticky top-14 z-40 rounded-lg border bg-card p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">Geração de Mídia</h3>
+          <div>
+            <h3 className="font-semibold text-sm">Geração de Mídia</h3>
+            <p className="text-xs text-muted-foreground">
+              🖼 {subScenesDone}/{totalSubScenes} imagens · 🔊 {subAudiosDone}/{totalSubScenes} áudios
+            </p>
+          </div>
           <div className="flex items-center gap-2">
-            <AssetReferenceSelector
-              selectedAssets={selectedAssets}
-              onSelectionChange={setSelectedAssets}
-            />
-            <StyleTemplateSelector
-              value={styleTemplateId}
-              onChange={(id, prefix) => { setStyleTemplateId(id); setStylePrefix(prefix); }}
-            />
+            <AssetReferenceSelector selectedAssets={selectedAssets} onSelectionChange={setSelectedAssets} />
+            <StyleTemplateSelector value={styleTemplateId} onChange={(id, prefix) => { setStyleTemplateId(id); setStylePrefix(prefix); }} />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" disabled={isAnyGenerating}>
+                  {isAnyGenerating ? <Loader2 className="animate-spin h-3 w-3" /> : <MoreVertical className="h-3 w-3" />}
+                  Ações
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleRegeneratePrompts} disabled={regenerating}>
+                  <RefreshCw className="h-3 w-3 mr-2" /> Regenerar Prompts
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleGenerateAllImages} disabled={generatingImages}>
+                  <Image className="h-3 w-3 mr-2" /> Gerar Todas Imagens
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleGenerateAllAudios} disabled={generatingAudios}>
+                  <Volume2 className="h-3 w-3 mr-2" /> Gerar Todos Áudios
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowImportDialog(true)} disabled={uploadingAudio}>
+                  <Upload className="h-3 w-3 mr-2" /> Enviar Áudio
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <AudioImportDialog open={showImportDialog} onOpenChange={setShowImportDialog} onConfirm={handleUploadAudio} />
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={handleRegeneratePrompts} disabled={regenerating}>
-            {regenerating ? <Loader2 className="animate-spin h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
-            Regenerar Prompts
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleGenerateAllImages} disabled={generatingImages}>
-            {generatingImages ? <Loader2 className="animate-spin h-3 w-3" /> : <Image className="h-3 w-3" />}
-            Gerar Todas Imagens
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleGenerateAllAudios} disabled={generatingAudios}>
-            {generatingAudios ? <Loader2 className="animate-spin h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
-            Gerar Todos Áudios
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)} disabled={uploadingAudio}>
-            {uploadingAudio ? <Loader2 className="animate-spin h-3 w-3" /> : <Upload className="h-3 w-3" />}
-            Enviar Áudio
-          </Button>
-          <AudioImportDialog
-            open={showImportDialog}
-            onOpenChange={setShowImportDialog}
-            onConfirm={handleUploadAudio}
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-muted-foreground">Imagens {subScenesDone}/{totalSubScenes}</span>
-            <Progress value={totalSubScenes > 0 ? (subScenesDone / totalSubScenes) * 100 : 0} className="mt-1" />
-          </div>
-          <div>
-            <span className="text-muted-foreground">Áudios {subAudiosDone}/{totalSubScenes}</span>
-            <Progress value={totalSubScenes > 0 ? (subAudiosDone / totalSubScenes) * 100 : 0} className="mt-1" />
-          </div>
-        </div>
+
+        <Progress value={totalProgress} className="h-2" />
+
         <CostEstimateCard
-          wordCount={project.raw_script?.trim().split(/\s+/).length || 0}
           charCount={allSubScenes.reduce((sum, sc) => sum + (sc.narration_segment?.length || 0), 0)}
           subSceneCount={totalSubScenes}
         />
-        {statusText && <p className="text-xs text-muted-foreground">{statusText}</p>}
+
+        {statusText && <p className="text-xs text-muted-foreground animate-pulse">{statusText}</p>}
+
         {allDone && (
           <Button className="w-full" onClick={onNext}>
             Export <ArrowRight className="h-4 w-4" />
@@ -385,22 +315,98 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         )}
       </div>
 
-      {/* Segment list */}
-      <div className="space-y-2">
-        {segments.map((seg, i) => (
-          <SegmentCard
-            key={seg.id}
-            segment={seg}
-            showMedia
-            onUpdate={updates => updateSegment(i, updates)}
-            onGenerateImage={(subSceneId) => handleGenerateSingleImage(i, subSceneId)}
-            generatingImage={false}
-            generatingSubSceneId={genSubSceneId}
-          />
-        ))}
+      {/* Sub-scenes grid view per segment */}
+      <div className="space-y-4">
+        {segments.map((seg) => {
+          const momentCfg = seg.moment_type ? MOMENT_TYPE_CONFIG[seg.moment_type] : null;
+          const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
+
+          return (
+            <div key={seg.id} className="rounded-lg border bg-card overflow-hidden">
+              {/* Segment header */}
+              <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/30">
+                <span className="text-xs font-mono text-muted-foreground">{String(seg.sequence_number).padStart(3, '0')}</span>
+                {momentCfg && <Badge className={`text-[10px] ${momentCfg.color}`}>{momentCfg.label}</Badge>}
+                <p className="flex-1 text-xs text-muted-foreground line-clamp-1">{seg.narration.slice(0, 80)}...</p>
+                <span className="text-[10px] text-muted-foreground">{subScenes.length} sub-cenas</span>
+              </div>
+
+              {/* Sub-scenes grid */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 p-2">
+                {subScenes.map((sc) => {
+                  const isGenThisOne = genSubSceneId === sc.id;
+                  return (
+                    <div key={sc.id} className="rounded-md border border-border/50 bg-background overflow-hidden">
+                      {/* Image area */}
+                      <div className="aspect-video bg-muted/50 relative group">
+                        {sc.image_status === 'generating' && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <Loader2 className="animate-spin h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
+                        {sc.image_url ? (
+                          <img src={sc.image_url} alt={`Sub ${sc.sub_index}`} className="w-full h-full object-cover" />
+                        ) : sc.image_status !== 'generating' ? (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs opacity-60 hover:opacity-100"
+                              onClick={() => handleGenerateSingleImage(seg, sc)}
+                              disabled={isGenThisOne}
+                            >
+                              <Image className="h-3 w-3 mr-1" /> Gerar
+                            </Button>
+                          </div>
+                        ) : null}
+                        {/* Regenerate button overlay on existing image */}
+                        {sc.image_url && (
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="text-xs"
+                              onClick={() => handleGenerateSingleImage(seg, sc)}
+                              disabled={isGenThisOne}
+                            >
+                              <RefreshCw className="h-3 w-3 mr-1" /> Refazer
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Info */}
+                      <div className="p-1.5 space-y-1">
+                        <div className="flex items-center gap-1">
+                          <Badge variant="outline" className="text-[9px] px-1 py-0">Sub {sc.sub_index}</Badge>
+                          <StatusDot status={sc.image_status} />
+                          <StatusDot status={sc.audio_status} />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground line-clamp-2">{sc.narration_segment}</p>
+                        {sc.audio_url && (
+                          <audio controls src={sc.audio_url} className="w-full h-6" />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+function StatusDot({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    idle: 'bg-muted-foreground/40',
+    generating: 'bg-yellow-500 animate-pulse',
+    done: 'bg-green-500',
+    error: 'bg-destructive',
+  };
+  return <div className={`h-2 w-2 rounded-full ${colors[status] || colors.idle}`} />;
 }
 
 function mergeAlignments(alignments: Alignment[]): Alignment {

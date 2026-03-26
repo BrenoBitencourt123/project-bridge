@@ -64,10 +64,17 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
         .select();
       if (insertErr) throw insertErr;
 
+      // Build a map of maxSubScenes from the AI response
+      const maxSubScenesMap = new Map<number, number>();
+      data.segments.forEach((s: any, i: number) => {
+        if (s.maxSubScenes != null) maxSubScenesMap.set(i + 1, s.maxSubScenes);
+      });
+
       // Create sub-scenes for each inserted segment
       const allSubScenes: any[] = [];
       for (const seg of inserted) {
-        const subSceneInputs = splitIntoSubScenes(seg.narration, seg.image_prompt);
+        const maxSub = maxSubScenesMap.get(seg.sequence_number) ?? null;
+        const subSceneInputs = splitIntoSubScenes(seg.narration, seg.image_prompt, seg.moment_type, maxSub);
         for (const sc of subSceneInputs) {
           allSubScenes.push({
             segment_id: seg.id,
