@@ -1,33 +1,42 @@
 
 
-# Corrigir Assets para Influenciar Imagens Geradas
+# Alinhamento com Referência (mantendo áudio e estilo atuais)
 
-## Problema raiz
+## O que será mantido (sem alterações)
+- **Áudio**: Fluxo atual (gera áudio completo do roteiro + fatia por timestamps de sub-cena)
+- **Estilo visual**: Sketch com destaque em azul (estilo padrão atual)
 
-Analisando os requests de rede, o campo `assetImageUrls` esta **ausente** no body enviado para `generate-image`. Mesmo que estivesse presente, o sistema envia URLs externas como `image_url` parts -- o Lovable AI Gateway pode nao conseguir buscar essas URLs.
+## O que será implementado
 
-A referencia Atlas-new-creators faz diferente: **busca cada imagem de referencia, converte para base64, e envia como inline data** direto no request para a IA. Isso garante que a IA realmente "veja" as imagens.
+### 1. Modo Single (painéis empilhados) — Redução de custos ~50%
+A referência gera 2-3 sub-cenas numa **única imagem** empilhada verticalmente, depois recorta no frontend. Isso reduz o número de chamadas de API pela metade.
 
-## Plano
+- `generate-image`: novo parâmetro `panelCount` (2-3). Quando presente, o prompt instrui a IA a gerar painéis empilhados separados por linha branca
+- `MediaStep.tsx`: após receber a imagem, recorta em N partes iguais usando Canvas e atribui cada parte a uma sub-cena
 
-### 1. Edge Function `generate-image`: Fetch + base64 dos assets
-Em vez de enviar URLs como `image_url` parts, a funcao deve:
-- Receber `assetImageUrls` (array de URLs)
-- Para cada URL, fazer `fetch`, converter o `ArrayBuffer` para base64
-- Enviar como `image_url` com data URI (`data:image/png;base64,...`)
-- Limitar a 5 imagens de referencia para nao estourar o contexto
+### 2. Instrução de personagem mais forte
+Atualizar o prompt de `generate-image` de "include them with the exact appearance described" para "draw them exactly like the reference images provided — maintaining the same face, hair, and clothing style"
 
-### 2. Frontend `MediaStep.tsx`: Garantir envio de URLs
-- Verificar que `selectedAssets.map(a => a.image_url)` esta produzindo URLs validas
-- Filtrar URLs vazias/null antes de enviar
+### 3. Formatação TTS na segmentação
+Adicionar regra no prompt do `segment-script`: números por extenso, siglas fonéticas (ex: CDI → "cedê i", SELIC → "selic"). Melhora a qualidade do áudio gerado pela ElevenLabs.
+
+### 4. Fallback de modelo em segment-script e generate-image
+Implementar retry automático com `gemini-2.5-flash` como fallback quando o modelo primário falha ou dá timeout.
+
+### 5. Timeout em segment-script
+Adicionar AbortController com deadline de 55s (já existe em `generate-image`, falta em `segment-script`).
 
 ## Arquivos alterados
-| Arquivo | Mudanca |
+
+| Arquivo | Mudança |
 |---|---|
-| `supabase/functions/generate-image/index.ts` | Fetch assets como base64 inline data (como na referencia) |
-| `src/components/pipeline/MediaStep.tsx` | Filtrar URLs vazias dos assets |
+| `supabase/functions/generate-image/index.ts` | Modo single (painéis), instrução de personagem, fallback |
+| `supabase/functions/segment-script/index.ts` | Formatação TTS, timeout 55s, fallback de modelo |
+| `src/components/pipeline/MediaStep.tsx` | Lógica de recorte de painéis no Canvas, agrupamento de sub-cenas para modo single |
 
 ## Resultado
-- Assets selecionados serao realmente "vistos" pela IA como imagens de referencia
-- Personagem Atlas aparecera nas cenas relevantes
+- ~50% menos chamadas de API para imagens (modo single)
+- Assets influenciam imagens com instrução mais forte
+- Áudio com pronúncia melhor (formatação TTS)
+- Sistema mais resiliente (timeout + fallback em todas as funções)
 
