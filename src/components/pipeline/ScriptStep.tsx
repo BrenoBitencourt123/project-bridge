@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/integrations/supabase/client';
 import { Project } from '@/types/atlas';
 import { useToast } from '@/hooks/use-toast';
+import { CostEstimateCard } from './CostEstimateCard';
 
 interface ScriptStepProps {
   project: Project;
@@ -72,6 +73,9 @@ export function ScriptStep({ project, onUpdate, onNext }: ScriptStepProps) {
         rows={20}
         className="font-mono text-sm"
       />
+      {wordCount > 0 && (
+        <CostEstimateCard wordCount={wordCount} charCount={script.length} />
+      )}
       <Button className="w-full" onClick={handleSaveAndNext} disabled={!script.trim() || saving}>
         {saving && <Loader2 className="animate-spin" />}
         Salvar & Segmentar <ArrowRight className="h-4 w-4" />

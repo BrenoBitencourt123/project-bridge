@@ -6,6 +6,7 @@ import { Project, Segment } from '@/types/atlas';
 import { SegmentCard } from './SegmentCard';
 import { useToast } from '@/hooks/use-toast';
 import { splitIntoSubScenes } from '@/lib/split-sub-scenes';
+import { CostEstimateCard } from './CostEstimateCard';
 
 interface SegmentsStepProps {
   project: Project;
@@ -144,6 +145,8 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
   };
 
   const totalSubScenes = segments.reduce((sum, s) => sum + (s.sub_scenes?.length || 0), 0);
+  const totalChars = segments.flatMap(s => s.sub_scenes || []).reduce((sum, sc) => sum + (sc.narration_segment?.length || 0), 0);
+  const totalWords = project.raw_script?.trim().split(/\s+/).length || 0;
 
   return (
     <div className="space-y-4">
@@ -162,6 +165,11 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
               <SegmentCard key={seg.id} segment={seg} onUpdate={updates => updateSegmentLocal(i, updates)} />
             ))}
           </div>
+          <CostEstimateCard
+            wordCount={totalWords}
+            charCount={totalChars}
+            subSceneCount={totalSubScenes}
+          />
           <Button className="w-full" onClick={handleSaveAndNext} disabled={saving}>
             {saving && <Loader2 className="animate-spin" />}
             Salvar & Gerar Mídia <ArrowRight className="h-4 w-4" />
