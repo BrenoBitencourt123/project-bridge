@@ -25,6 +25,40 @@ interface MediaStepProps {
   onGeneratingChange?: (generating: boolean) => void;
 }
 
+/** Crop a panel image into N equal vertical slices using Canvas */
+async function cropPanelsFromImage(imageUrl: string, panelCount: number): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const panelHeight = Math.floor(img.height / panelCount);
+      const results: string[] = [];
+      for (let i = 0; i < panelCount; i++) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = panelHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas context failed')); return; }
+        ctx.drawImage(img, 0, i * panelHeight, img.width, panelHeight, 0, 0, img.width, panelHeight);
+        results.push(canvas.toDataURL('image/png'));
+      }
+      resolve(results);
+    };
+    img.onerror = () => reject(new Error('Failed to load panel image'));
+    img.src = imageUrl;
+  });
+}
+
+/** Convert a data URL to a Blob */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, b64] = dataUrl.split(',');
+  const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
+  const bytes = atob(b64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
 export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange }: MediaStepProps) {
   const { toast } = useToast();
   const [generatingImages, setGeneratingImages] = useState(false);
@@ -102,40 +136,140 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     }
   };
 
+  /** Upload a cropped panel image to storage and update the sub-scene */
+  const uploadCroppedPanel = async (
+    seg: Segment, sc: SubScene, dataUrl: string
+  ) => {
+    const blob = dataUrlToBlob(dataUrl);
+    const num = String(seg.sequence_number).padStart(3, '0');
+    const fileName = `${project.id}/segment-${num}-sub-${sc.sub_index}.png`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('segment-images')
+      .upload(fileName, blob, { upsert: true, contentType: 'image/png' });
+    if (uploadErr) { console.error('Upload error:', uploadErr); return; }
+
+    const { data: urlData } = supabase.storage.from('segment-images').getPublicUrl(fileName);
+    const imageUrl = urlData.publicUrl + `?t=${Date.now()}`;
+
+    updateSubSceneInSegments(seg.id, sc.id, { image_url: imageUrl, image_status: 'done' });
+    await supabase.from('sub_scenes').update({ image_url: imageUrl, image_status: 'done' }).eq('id', sc.id);
+  };
+
   const handleGenerateAllImages = async () => {
     setGeneratingImages(true);
     onGeneratingChange?.(true);
     setImageProgress(0);
     let done = 0;
+
+    const assetPayload = {
+      assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
+      assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
+    };
+
     for (const seg of segments) {
-      for (const sc of (seg.sub_scenes || [])) {
-        if (sc.image_status === 'done') { done++; setImageProgress((done / totalSubScenes) * 100); continue; }
-        updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
+      const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
+      const pendingSubs = subScenes.filter(sc => sc.image_status !== 'done');
+
+      if (pendingSubs.length === 0) {
+        done += subScenes.length;
+        setImageProgress((done / totalSubScenes) * 100);
+        continue;
+      }
+
+      // Already done subs count toward progress
+      done += subScenes.length - pendingSubs.length;
+
+      // Use panel mode when 2-3 pending sub-scenes exist
+      if (pendingSubs.length >= 2 && pendingSubs.length <= 3) {
+        // Mark all as generating
+        for (const sc of pendingSubs) {
+          updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
+        }
+
         try {
           const { data, error } = await supabase.functions.invoke('generate-image', {
             body: {
-              imagePrompt: sc.image_prompt, projectId: project.id, segmentId: seg.id,
-              sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
+              imagePrompt: seg.image_prompt,
+              projectId: project.id,
+              segmentId: seg.id,
+              sequenceNumber: seg.sequence_number,
+              momentType: seg.moment_type,
               stylePrefix,
-              assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
-              assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
+              ...assetPayload,
+              panelCount: pendingSubs.length,
+              panelPrompts: pendingSubs.map(sc => sc.image_prompt || seg.image_prompt),
             },
           });
           if (error) throw error;
-          updateSubSceneInSegments(seg.id, sc.id, { image_url: data.imageUrl, image_status: 'done' });
-          await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', sc.id);
+
+          if (data.isPanelImage && data.panelCount > 1) {
+            setStatusText(`Recortando ${data.panelCount} painéis...`);
+            const croppedDataUrls = await cropPanelsFromImage(data.imageUrl, data.panelCount);
+            for (let i = 0; i < croppedDataUrls.length && i < pendingSubs.length; i++) {
+              await uploadCroppedPanel(seg, pendingSubs[i], croppedDataUrls[i]);
+              done++;
+              setImageProgress((done / totalSubScenes) * 100);
+            }
+          } else {
+            // Fallback: assign the single image to the first sub-scene
+            updateSubSceneInSegments(seg.id, pendingSubs[0].id, { image_url: data.imageUrl, image_status: 'done' });
+            await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', pendingSubs[0].id);
+            done++;
+            setImageProgress((done / totalSubScenes) * 100);
+            // Generate remaining individually
+            for (let i = 1; i < pendingSubs.length; i++) {
+              await generateSingleSubSceneImage(seg, pendingSubs[i], assetPayload);
+              done++;
+              setImageProgress((done / totalSubScenes) * 100);
+            }
+          }
         } catch {
-          updateSubSceneInSegments(seg.id, sc.id, { image_status: 'error' });
-          await supabase.from('sub_scenes').update({ image_status: 'error' }).eq('id', sc.id);
+          for (const sc of pendingSubs) {
+            updateSubSceneInSegments(seg.id, sc.id, { image_status: 'error' });
+            await supabase.from('sub_scenes').update({ image_status: 'error' }).eq('id', sc.id);
+          }
+          done += pendingSubs.length;
+          setImageProgress((done / totalSubScenes) * 100);
         }
-        done++;
-        setImageProgress((done / totalSubScenes) * 100);
+        setStatusText('');
+      } else {
+        // Single mode: generate one by one (1 sub-scene or 4+)
+        for (const sc of pendingSubs) {
+          await generateSingleSubSceneImage(seg, sc, assetPayload);
+          done++;
+          setImageProgress((done / totalSubScenes) * 100);
+        }
       }
     }
+
     await supabase.from('projects').update({ status: 'images_done', updated_at: new Date().toISOString() }).eq('id', project.id);
     onUpdate({ status: 'images_done' });
     setGeneratingImages(false);
     onGeneratingChange?.(false);
+  };
+
+  const generateSingleSubSceneImage = async (
+    seg: Segment, sc: SubScene,
+    assetPayload: { assetDescriptions: any[]; assetImageUrls: string[] }
+  ) => {
+    updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-image', {
+        body: {
+          imagePrompt: sc.image_prompt, projectId: project.id, segmentId: seg.id,
+          sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
+          stylePrefix,
+          ...assetPayload,
+        },
+      });
+      if (error) throw error;
+      updateSubSceneInSegments(seg.id, sc.id, { image_url: data.imageUrl, image_status: 'done' });
+      await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', sc.id);
+    } catch {
+      updateSubSceneInSegments(seg.id, sc.id, { image_status: 'error' });
+      await supabase.from('sub_scenes').update({ image_status: 'error' }).eq('id', sc.id);
+    }
   };
 
   const flattenSubScenes = (): { subScene: SubScene; segment: Segment; flatIndex: number }[] => {
@@ -248,9 +382,9 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         body: {
           imagePrompt: sc.image_prompt, projectId: project.id, segmentId: seg.id,
           sequenceNumber: seg.sequence_number, subIndex: sc.sub_index, momentType: seg.moment_type,
-           stylePrefix,
-            assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
-            assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
+          stylePrefix,
+          assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
+          assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
         },
       });
       if (error) throw error;
