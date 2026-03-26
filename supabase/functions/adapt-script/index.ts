@@ -9,6 +9,16 @@ const TIMEOUT_MS = 55_000;
 const PRIMARY_MODEL = "google/gemini-2.5-flash";
 const FALLBACK_MODEL = "google/gemini-2.5-flash-lite";
 
+type VideoScriptItem = {
+  time: string;
+  narration: string;
+  visual: string;
+};
+
+type AdaptScriptResponse = {
+  video_script: VideoScriptItem[];
+};
+
 function repairJson(json: string): string {
   let braces = 0, brackets = 0;
   for (const c of json) {
@@ -26,27 +36,94 @@ function repairJson(json: string): string {
     .replace(/[\x00-\x1F\x7F]/g, "");
 }
 
+function tryParseJson(candidate: string): unknown | null {
+  if (!candidate.trim()) return null;
+  try { return JSON.parse(candidate); } catch { /* continue */ }
+  try { return JSON.parse(repairJson(candidate)); } catch { /* continue */ }
+  return null;
+}
+
+function getMessageContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+        return part.text;
+      }
+      return "";
+    })
+    .join("\n")
+    .trim();
+}
+
 function extractAndParseJson(content: string): unknown {
-  // Strip markdown code fences
   let cleaned = content
     .replace(/```json\s*/gi, "")
     .replace(/```\s*/g, "")
     .trim();
 
-  // Try direct parse
-  try { return JSON.parse(cleaned); } catch { /* continue */ }
+  const candidates = new Set<string>([cleaned]);
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  const firstBracket = cleaned.indexOf("[");
+  const lastBracket = cleaned.lastIndexOf("]");
 
-  // Find JSON boundaries
-  const jsonStart = cleaned.search(/\{/);
-  if (jsonStart !== -1) {
-    const candidate = cleaned.substring(jsonStart);
-    try { return JSON.parse(candidate); } catch { /* continue */ }
-    try { return JSON.parse(repairJson(candidate)); } catch { /* continue */ }
+  if (firstBrace !== -1) {
+    candidates.add(cleaned.slice(firstBrace));
   }
 
-  // Last resort: repair entire content
-  try { return JSON.parse(repairJson(cleaned)); } catch { /* continue */ }
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.add(cleaned.slice(firstBrace, lastBrace + 1));
+  }
+
+  if (firstBracket !== -1) {
+    candidates.add(cleaned.slice(firstBracket));
+  }
+
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    candidates.add(cleaned.slice(firstBracket, lastBracket + 1));
+  }
+
+  for (const candidate of candidates) {
+    const parsed = tryParseJson(candidate);
+    if (parsed !== null) return parsed;
+  }
+
   throw new Error("Não foi possível extrair JSON válido da resposta da IA");
+}
+
+function normalizeParsedResponse(parsed: unknown): AdaptScriptResponse {
+  const source = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).video_script)
+      ? ((parsed as Record<string, unknown>).video_script as unknown[])
+      : null;
+
+  if (!source) {
+    throw new Error("Resposta da IA não contém video_script válido");
+  }
+
+  const video_script = source
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const time = typeof record.time === "string" ? record.time.trim() : "";
+      const narration = typeof record.narration === "string" ? record.narration.trim() : "";
+      const visual = typeof record.visual === "string" ? record.visual.trim() : "";
+
+      if (!time || !narration || !visual) return null;
+      return { time, narration, visual };
+    })
+    .filter((item): item is VideoScriptItem => Boolean(item));
+
+  if (!video_script.length) {
+    throw new Error("Resposta da IA não contém video_script válido");
+  }
+
+  return { video_script };
 }
 
 async function callAIWithFallback(
@@ -69,7 +146,13 @@ async function callAIWithFallback(
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ model, messages, temperature, max_tokens: 16384 }),
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature,
+          max_tokens: 12288,
+          response_format: { type: "json_object" },
+        }),
         signal: controller.signal,
       });
 
@@ -96,102 +179,35 @@ async function callAIWithFallback(
   }
 }
 
-const SYSTEM_PROMPT = `Você é um roteirista profissional de vídeos educacionais para YouTube, especializado em conteúdos que ajudam estudantes a se prepararem para o ENEM 2026.
+const SYSTEM_PROMPT = `Você adapta roteiros brutos para um formato estruturado de vídeo.
 
-Você vai receber um ROTEIRO DE NARRAÇÃO BRUTO colado pelo usuário.
-Sua tarefa é ADAPTAR esse roteiro para o formato padrão com cenas visuais.
-
-REGRAS CRÍTICAS:
-
-MANTENHA O TEXTO ORIGINAL DA NARRAÇÃO praticamente inalterado.
-Você pode fazer apenas correções mínimas de gramática, fluidez e TTS, sem mudar a ideia, sem adicionar conteúdo novo e sem remover partes do texto.
-
-Divida o roteiro em BLOCOS de 30 a 90 palavras cada.
-
-Para CADA bloco, crie uma descrição visual detalhada no campo "visual", descrevendo a cena ideal para acompanhar a narração.
-
-Calcule os tempos aproximados de cada bloco usando esta regra:
-1 palavra ≈ 0.4 segundos
-150 palavras por minuto
-
-Numere os blocos em timestamps sequenciais.
-
-Aplique formatação TTS quando necessário:
-- números por extenso
-- porcentagens por extenso
-- anos por extenso quando soar melhor para narração
-- fórmulas e expressões matemáticas adaptadas para leitura natural
-- siglas lidas de forma fonética quando necessário
-
-Exemplos de adaptação TTS:
-- 10% → "dez por cento"
-- 1º grau → "primeiro grau"
-- 2º grau → "segundo grau"
-- x² → "xis ao quadrado"
-- f(x) → "efe de xis"
-- km/h → "quilômetros por hora"
-- ENEM → "enêm"
-- IA → "i-a"
-- UFU → "u-efe-u"
-
-NÃO adicione conteúdo novo à narração.
-NÃO remova partes da narração.
-NÃO resuma o texto.
-NÃO reescreva completamente o roteiro.
-NÃO transforme o texto em aula formal ou apostila.
-
-A narração deve continuar com linguagem natural, falada, leve e boa para vídeo de YouTube.
-
-As descrições visuais devem seguir estas diretrizes:
-- foco em clareza didática
-- cenas simples, visuais e fáceis de entender
-- estética educacional envolvente
-- preferência por elementos como caderno, quadro, setas, destaques, gráficos simples, tabelas, palavras-chave na tela, comparações visuais, metáforas fáceis e exemplos concretos
-- quando fizer sentido, usar estilo visual escolar/desenhado à mão, com sensação de estudo e acentos em azul
-- mostrar visualmente a lógica do que está sendo explicado
-- transformar conceitos abstratos em imagens fáceis de entender
-- usar texto na tela apenas quando realmente ajudar a retenção
-- destacar erros comuns, palavras-chave e raciocínios importantes
-- manter as cenas genéricas, sem citar marcas, logos ou nomes de canais
-
-Se o bloco falar de:
-- matemática: priorize números, contas, setas, gráficos, comparações e destaque de erro comum
-- redação: priorize estrutura visual, blocos de texto, palavras-chave, repertório, tese, conectivos e comparação entre versão fraca e versão forte
-- interpretação: priorize trechos destacados, palavras-chave, alternativas, comparação de sentidos e pegadinhas
-- ciências da natureza ou humanas: priorize esquemas simples, relações de causa e efeito, linha do tempo, mapas, ícones e comparações visuais
-
-As descrições visuais nunca devem depender de marcas específicas ou de assets impossíveis.
-Elas devem ser viáveis para edição com imagens, motion simples, ilustrações, elementos gráficos e apoio visual de YouTube.
-
-FOCO EDITORIAL:
-Sempre que fizer sentido, trate o conteúdo como material voltado para o ENEM 2026.
-No campo "youtube_description" e no campo "youtube_tags", priorize SEO voltado para ENEM 2026.
-
-FORMATO DE SAÍDA:
-Responda APENAS com JSON válido.
-
+Retorne APENAS JSON válido no formato:
 {
   "video_script": [
     {
       "time": "MM:SS - MM:SS",
-      "narration": "texto da narração do bloco",
-      "visual": "descrição detalhada da cena/imagem"
+      "narration": "...",
+      "visual": "..."
     }
-  ],
-  "youtube_description": "descrição otimizada para YouTube com emojis, boa formatação, linguagem natural, foco em SEO e menções estratégicas a ENEM 2026 quando fizer sentido",
-  "youtube_tags": ["tag1", "tag2", "tag3"]
+  ]
 }
 
-REGRAS DO JSON:
-- O campo "narration" deve conter APENAS o texto falado daquele bloco
-- O campo "visual" deve descrever a cena com detalhes suficientes para orientar edição ou geração visual
-- O campo "time" deve seguir ordem cronológica contínua
-- O campo "youtube_description" deve ser escaneável, clara e otimizada para clique e busca
-- O campo "youtube_tags" deve conter de 8 a 12 tags relevantes
-- Não escreva explicações fora do JSON
-- Não use markdown
-- Não coloque comentários
-- Responda somente com o JSON final`;
+Regras obrigatórias:
+- Preserve a narração original quase intacta.
+- Faça apenas correções mínimas de gramática, fluidez e TTS.
+- Não adicione conteúdo novo.
+- Não remova ideias do texto.
+- Não resuma demais.
+- Divida em blocos de 30 a 90 palavras.
+- Calcule timestamps sequenciais usando 1 palavra ≈ 0.4 segundos.
+- O campo "narration" deve conter apenas o texto falado do bloco.
+- O campo "visual" deve ser em português, concreto, claro e útil para orientar edição/geração visual.
+- O campo "visual" deve ser detalhado, mas objetivo, com no máximo 3 frases curtas.
+- Adapte TTS quando necessário: números, datas, porcentagens, siglas e fórmulas devem soar naturais em voz alta.
+- Não use markdown.
+- Não use comentários.
+- Não escreva texto antes ou depois do JSON.
+- Não inclua outras chaves além de "video_script".`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -214,12 +230,21 @@ serve(async (req) => {
       0.3
     );
 
-    const text = result.choices?.[0]?.message?.content || "{}";
-    const parsed = extractAndParseJson(text) as { video_script?: any[] };
+    const choice = result.choices?.[0];
+    const finishReason = choice?.finish_reason;
+    const text = getMessageContent(choice?.message?.content);
 
-    if (!parsed.video_script || !Array.isArray(parsed.video_script)) {
-      throw new Error("Resposta da IA não contém video_script válido");
+    console.log(`AI finish_reason: ${finishReason ?? "unknown"}, content_length: ${text.length}`);
+
+    if (!text.trim()) {
+      throw new Error("A IA retornou uma resposta vazia");
     }
+
+    if (finishReason === "length") {
+      throw new Error("A resposta da IA foi truncada antes de concluir o JSON. Tente um roteiro menor ou gere em partes.");
+    }
+
+    const parsed = normalizeParsedResponse(extractAndParseJson(text));
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
