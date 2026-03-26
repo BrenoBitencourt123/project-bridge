@@ -44,35 +44,54 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    const segmentList = segments.map((s: any, i: number) =>
-      `${i + 1}. [${s.momentType || "concept"}] "${s.narration}"`
-    ).join("\n");
+    // Build a flat list of sub-scenes with their context
+    const subSceneList: string[] = [];
+    let flatIdx = 0;
+    for (const seg of segments) {
+      const subScenes = seg.subScenes || [];
+      if (subScenes.length === 0) {
+        // No sub-scenes: treat the segment narration as a single item
+        flatIdx++;
+        subSceneList.push(
+          `${flatIdx}. [Bloco ${seg.sequenceNumber || '?'}, tipo: ${seg.momentType || 'concept'}] "${seg.narration}"`
+        );
+      } else {
+        for (const sc of subScenes) {
+          flatIdx++;
+          subSceneList.push(
+            `${flatIdx}. [Bloco ${seg.sequenceNumber || '?'}, sub-cena ${sc.subIndex}, tipo: ${seg.momentType || 'concept'}] "${sc.narration}"`
+          );
+        }
+      }
+    }
 
-    const prompt = `Para cada segmento de narração abaixo, gere um prompt de imagem (imagePrompt) e um campo de simbolismo (symbolism).
+    const prompt = `Você é um diretor de arte para vídeos educacionais ilustrados no estilo sketch (esboço a lápis em papel bege com destaque em azul).
 
-REGRAS:
-- imagePrompt DEVE ser escrito em português brasileiro (PT-BR)
-- Se a imagem tiver textos visíveis (rótulos, placas, fórmulas), eles DEVEM estar em PT-BR, NUNCA em inglês
-- imagePrompt: descreva uma imagem literal e concreta, estilo esboço à mão em papel bege
-- NÃO use metáforas abstratas — ilustre literalmente o que o narrador fala
-- Se houver fórmulas matemáticas, inclua-as no prompt
+Para CADA sub-cena abaixo, gere um prompt de imagem (imagePrompt) ÚNICO e ESPECÍFICO para o conteúdo da narração.
+
+REGRAS OBRIGATÓRIAS:
+- imagePrompt DEVE ser em português brasileiro (PT-BR)
+- Descreva uma cena LITERAL e CONCRETA que ilustre ESPECIFICAMENTE o que a narração diz
+- CADA sub-cena deve ter uma composição visual DIFERENTE — não repita elementos centrais
+- Se a narração fala de um conceito abstrato, use uma METÁFORA VISUAL concreta
+- Se houver fórmulas/números, inclua-os no prompt
+- Textos visíveis na imagem: máximo 1-4 palavras (rótulos, valores)
 - NUNCA inclua nomes de marca, canal ou logos
-- Texto visível na imagem: máximo 1-4 palavras (títulos, rótulos, valores numéricos)
 - symbolism: breve explicação do que a imagem representa
 
-SEGMENTOS:
-${segmentList}
+SUB-CENAS:
+${subSceneList.join('\n')}
 
-Responda APENAS com JSON: {"prompts": [{"imagePrompt": "...", "symbolism": "..."}]}`;
+Responda com JSON: {"prompts": [{"imagePrompt": "...", "symbolism": "..."}]}
+Total esperado: ${flatIdx} prompts (um por sub-cena).`;
 
     const messages = [{ role: "user", content: prompt }];
 
-    // Use tool calling for structured output
     const tools = [{
       type: "function",
       function: {
         name: "return_prompts",
-        description: "Return image prompts and symbolism for each segment",
+        description: "Return image prompts and symbolism for each sub-scene",
         parameters: {
           type: "object",
           properties: {

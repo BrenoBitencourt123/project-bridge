@@ -55,13 +55,10 @@ export function splitIntoSubScenes(
 
   // 1 sub-cena → retorna direto sem dividir
   if (count === 1) {
-    const pos = 'OPENING';
     return [{
       sub_index: 1,
       narration_segment: narration.trim(),
-      image_prompt: baseImagePrompt
-        ? `${baseImagePrompt} — ${pos}: ${CAMERA_ANGLES[pos]}`
-        : null,
+      image_prompt: null,
     }];
   }
 
@@ -73,13 +70,10 @@ export function splitIntoSubScenes(
 
   // Fallback: sem frases identificáveis → narração inteira como 1 sub-cena
   if (sentences.length === 0) {
-    const pos = 'OPENING';
     return [{
       sub_index: 1,
       narration_segment: narration.trim(),
-      image_prompt: baseImagePrompt
-        ? `${baseImagePrompt} — ${pos}: ${CAMERA_ANGLES[pos]}`
-        : null,
+      image_prompt: null,
     }];
   }
 
@@ -87,13 +81,10 @@ export function splitIntoSubScenes(
   const total = chunks.length;
 
   return chunks.map((chunk, i) => {
-    const pos = derivePosition(i + 1, total);
     return {
       sub_index: i + 1,
       narration_segment: chunk,
-      image_prompt: baseImagePrompt
-        ? `${baseImagePrompt} — ${pos}: ${CAMERA_ANGLES[pos]}`
-        : null,
+      image_prompt: null,
     };
   });
 }

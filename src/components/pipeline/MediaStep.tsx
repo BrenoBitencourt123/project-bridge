@@ -128,20 +128,64 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const handleRegeneratePrompts = async () => {
     setRegenerating(true);
     try {
+      // Build payload with sub-scene narrations for per-sub-scene prompt generation
+      const segmentPayload = segments.map(s => ({
+        narration: s.narration,
+        momentType: s.moment_type,
+        sequenceNumber: s.sequence_number,
+        subScenes: (s.sub_scenes || [])
+          .sort((a, b) => a.sub_index - b.sub_index)
+          .map(sc => ({ subIndex: sc.sub_index, narration: sc.narration_segment })),
+      }));
+
       const { data, error } = await supabase.functions.invoke('regenerate-prompts', {
-        body: { segments: segments.map(s => ({ narration: s.narration, momentType: s.moment_type })) },
+        body: { segments: segmentPayload },
       });
       if (error) throw error;
-      const updated = segments.map((s, i) => ({
-        ...s,
-        image_prompt: data.prompts[i]?.imagePrompt || s.image_prompt,
-        symbolism: data.prompts[i]?.symbolism || s.symbolism,
-      }));
+
+      // Distribute prompts back to sub-scenes
+      let promptIdx = 0;
+      const updated = segments.map(s => {
+        const subScenes = (s.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
+        if (subScenes.length === 0) {
+          // No sub-scenes: assign to segment level
+          const p = data.prompts[promptIdx++];
+          return {
+            ...s,
+            image_prompt: p?.imagePrompt || s.image_prompt,
+            symbolism: p?.symbolism || s.symbolism,
+          };
+        }
+        // Assign per sub-scene
+        const updatedSubScenes = subScenes.map(sc => {
+          const p = data.prompts[promptIdx++];
+          return {
+            ...sc,
+            image_prompt: p?.imagePrompt || sc.image_prompt,
+          };
+        });
+        // Use first sub-scene's symbolism for the segment
+        const firstPrompt = data.prompts[promptIdx - subScenes.length];
+        return {
+          ...s,
+          symbolism: firstPrompt?.symbolism || s.symbolism,
+          sub_scenes: updatedSubScenes,
+        };
+      });
+
       onSegmentsChange(updated);
+
+      // Persist to DB
       for (const seg of updated) {
-        await supabase.from('segments').update({ image_prompt: seg.image_prompt, symbolism: seg.symbolism }).eq('id', seg.id);
+        await supabase.from('segments').update({ symbolism: seg.symbolism }).eq('id', seg.id);
+        for (const sc of (seg.sub_scenes || [])) {
+          if (sc.image_prompt) {
+            await supabase.from('sub_scenes').update({ image_prompt: sc.image_prompt }).eq('id', sc.id);
+          }
+        }
       }
-      toast({ title: 'Prompts regenerados!' });
+
+      toast({ title: 'Prompts regenerados por sub-cena!' });
     } catch (err: any) {
       toast({ title: 'Erro', description: err.message, variant: 'destructive' });
     } finally {
