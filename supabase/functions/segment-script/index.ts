@@ -18,8 +18,8 @@ serve(async (req) => {
     const prompt = `Você é um segmentador de roteiros para vídeos educacionais. Divida o roteiro abaixo em BLOCOS de narração.
 
 REGRAS:
-- Cada bloco deve ter entre 30 e 90 palavras de narração
-- Gere entre 40 e 60 blocos para um roteiro de 10 minutos
+- Cada bloco deve ter entre 60 e 150 palavras de narração
+- Gere entre 8 e 15 blocos para um roteiro de ~8 minutos (ajuste proporcionalmente)
 - O campo "narration" deve ser um trecho EXATO do roteiro original, sem modificar palavras
 - O campo "imagePrompt" DEVE ser escrito em português brasileiro (PT-BR)
 - Se a imagem tiver textos visíveis (rótulos, placas, fórmulas), eles DEVEM estar em PT-BR, NUNCA em inglês
@@ -31,6 +31,7 @@ REGRAS:
 - O campo "symbolism" deve explicar brevemente o que a imagem representa
 - O campo "momentType" deve ser um de: hook, concept, example, list_summary, cta
 - Cada bloco deve ser um trecho coeso e contínuo do roteiro, mantendo frases completas
+- IMPORTANTE: Prefira MENOS blocos com MAIS texto cada, para reduzir o número total de imagens
 
 ROTEIRO:
 ${script}
