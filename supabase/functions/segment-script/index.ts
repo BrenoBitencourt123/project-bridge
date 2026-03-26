@@ -62,7 +62,7 @@ Responda APENAS com um JSON válido no formato:
 
     const result = await response.json();
     const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-    const parsed = JSON.parse(text);
+    const parsed = extractAndParseJson(text);
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
