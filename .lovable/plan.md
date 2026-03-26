@@ -1,42 +1,46 @@
 
 
-# Alinhamento com Referência (mantendo áudio e estilo atuais)
+# Corrigir Segmentação: ~30 blocos e ~90 sub-cenas (7s por sub-cena)
 
-## O que será mantido (sem alterações)
-- **Áudio**: Fluxo atual (gera áudio completo do roteiro + fatia por timestamps de sub-cena)
-- **Estilo visual**: Sketch com destaque em azul (estilo padrão atual)
+## Problema
 
-## O que será implementado
+O "Re-segmentar (rápido)" divide por parágrafos individuais, gerando 75 blocos minúsculos. A lógica de sub-cenas em `split-sub-scenes.ts` usa thresholds que não consideram a meta de 7 segundos por sub-cena.
 
-### 1. Modo Single (painéis empilhados) — Redução de custos ~50%
-A referência gera 2-3 sub-cenas numa **única imagem** empilhada verticalmente, depois recorta no frontend. Isso reduz o número de chamadas de API pela metade.
+## Cálculo de referência
 
-- `generate-image`: novo parâmetro `panelCount` (2-3). Quando presente, o prompt instrui a IA a gerar painéis empilhados separados por linha branca
-- `MediaStep.tsx`: após receber a imagem, recorta em N partes iguais usando Canvas e atribui cada parte a uma sub-cena
+- Velocidade de fala: ~2.5 palavras/segundo
+- 7 segundos = ~18 palavras por sub-cena
+- Roteiro de ~2500 palavras → ~30 blocos de ~83 palavras → ~3 sub-cenas por bloco → ~90 sub-cenas
 
-### 2. Instrução de personagem mais forte
-Atualizar o prompt de `generate-image` de "include them with the exact appearance described" para "draw them exactly like the reference images provided — maintaining the same face, hair, and clothing style"
+## Mudanças
 
-### 3. Formatação TTS na segmentação
-Adicionar regra no prompt do `segment-script`: números por extenso, siglas fonéticas (ex: CDI → "cedê i", SELIC → "selic"). Melhora a qualidade do áudio gerado pela ElevenLabs.
+### 1. `src/components/pipeline/SegmentsStep.tsx` — Segmentação local inteligente
 
-### 4. Fallback de modelo em segment-script e generate-image
-Implementar retry automático com `gemini-2.5-flash` como fallback quando o modelo primário falha ou dá timeout.
+Substituir o split por `\n\n` por lógica que **agrupa parágrafos consecutivos** até atingir ~80-100 palavras por bloco. Resultado: ~30 blocos em vez de 75.
 
-### 5. Timeout em segment-script
-Adicionar AbortController com deadline de 55s (já existe em `generate-image`, falta em `segment-script`).
+### 2. `src/lib/split-sub-scenes.ts` — Thresholds para 7 segundos
 
-## Arquivos alterados
+Recalcular os thresholds baseado na meta de ~18 palavras por sub-cena:
+
+| Palavras no bloco | Sub-cenas | Palavras/sub-cena | Duração estimada |
+|---|---|---|---|
+| < 30 | 1 | ~25 | ~10s |
+| 30-54 | 2 | ~21 | ~8s |
+| 55-79 | 3 | ~22 | ~9s |
+| 80-109 | 4 | ~24 | ~9s |
+| 110+ | 5 | ~24 | ~9s |
+
+Manter regra de 1 sub-cena forçada para `cta` e `hook`.
+
+### 3. `supabase/functions/adapt-script/index.ts` — Blocos maiores
+
+Ajustar o prompt: blocos de **60-120 palavras** (em vez de 30-90) para gerar ~25-35 blocos com descrições visuais, alinhado com a segmentação local.
+
+### Arquivos alterados
 
 | Arquivo | Mudança |
 |---|---|
-| `supabase/functions/generate-image/index.ts` | Modo single (painéis), instrução de personagem, fallback |
-| `supabase/functions/segment-script/index.ts` | Formatação TTS, timeout 55s, fallback de modelo |
-| `src/components/pipeline/MediaStep.tsx` | Lógica de recorte de painéis no Canvas, agrupamento de sub-cenas para modo single |
-
-## Resultado
-- ~50% menos chamadas de API para imagens (modo single)
-- Assets influenciam imagens com instrução mais forte
-- Áudio com pronúncia melhor (formatação TTS)
-- Sistema mais resiliente (timeout + fallback em todas as funções)
+| `src/components/pipeline/SegmentsStep.tsx` | Agrupar parágrafos em blocos de ~80-100 palavras |
+| `src/lib/split-sub-scenes.ts` | Novos thresholds para ~18 palavras/sub-cena (7s) |
+| `supabase/functions/adapt-script/index.ts` | Prompt com blocos de 60-120 palavras |
 
