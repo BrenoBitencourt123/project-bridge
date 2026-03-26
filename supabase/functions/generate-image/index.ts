@@ -120,10 +120,20 @@ async function callImageAIWithFallback(
       if (response.status === 402) throw { status: 402, message: "AI credits exhausted — please add funds in Settings > Workspace > Usage" };
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`AI Gateway error [${response.status}]: ${errText}`);
+        throw new Error(`AI Gateway error [${response.status}]: ${errText.slice(0, 500)}`);
       }
 
-      const result = await response.json();
+      const responseText = await response.text();
+      if (responseText.trimStart().startsWith('<')) {
+        throw new Error(`AI Gateway returned HTML instead of JSON (likely temporary error). Response: ${responseText.slice(0, 200)}`);
+      }
+
+      let result: any;
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        throw new Error(`AI Gateway returned invalid JSON: ${responseText.slice(0, 200)}`);
+      }
 
       // Check for embedded errors (429/rate-limit returned inside a 200 response)
       const choiceError = result.choices?.[0]?.error;
