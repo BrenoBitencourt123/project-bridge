@@ -8,6 +8,8 @@ const corsHeaders = {
 const TIMEOUT_MS = 55_000;
 const PRIMARY_MODEL = "google/gemini-2.5-flash";
 const FALLBACK_MODEL = "google/gemini-2.5-flash-lite";
+const PRIMARY_MAX_TOKENS = 16_384;
+const REPAIR_MAX_TOKENS = 12_288;
 
 type VideoScriptItem = {
   time: string;
@@ -20,17 +22,27 @@ type AdaptScriptResponse = {
 };
 
 function repairJson(json: string): string {
-  let braces = 0, brackets = 0;
+  let braces = 0;
+  let brackets = 0;
+
   for (const c of json) {
-    if (c === '{') braces++;
-    if (c === '}') braces--;
-    if (c === '[') brackets++;
-    if (c === ']') brackets--;
+    if (c === "{") braces++;
+    if (c === "}") braces--;
+    if (c === "[") brackets++;
+    if (c === "]") brackets--;
   }
-  let r = json;
-  while (brackets > 0) { r += ']'; brackets--; }
-  while (braces > 0) { r += '}'; braces--; }
-  return r
+
+  let repaired = json;
+  while (brackets > 0) {
+    repaired += "]";
+    brackets--;
+  }
+  while (braces > 0) {
+    repaired += "}";
+    braces--;
+  }
+
+  return repaired
     .replace(/,\s*}/g, "}")
     .replace(/,\s*]/g, "]")
     .replace(/[\x00-\x1F\x7F]/g, "");
@@ -38,8 +50,16 @@ function repairJson(json: string): string {
 
 function tryParseJson(candidate: string): unknown | null {
   if (!candidate.trim()) return null;
-  try { return JSON.parse(candidate); } catch { /* continue */ }
-  try { return JSON.parse(repairJson(candidate)); } catch { /* continue */ }
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    // continue
+  }
+  try {
+    return JSON.parse(repairJson(candidate));
+  } catch {
+    // continue
+  }
   return null;
 }
 
@@ -60,7 +80,7 @@ function getMessageContent(content: unknown): string {
 }
 
 function extractAndParseJson(content: string): unknown {
-  let cleaned = content
+  const cleaned = content
     .replace(/```json\s*/gi, "")
     .replace(/```\s*/g, "")
     .trim();
@@ -71,21 +91,10 @@ function extractAndParseJson(content: string): unknown {
   const firstBracket = cleaned.indexOf("[");
   const lastBracket = cleaned.lastIndexOf("]");
 
-  if (firstBrace !== -1) {
-    candidates.add(cleaned.slice(firstBrace));
-  }
-
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    candidates.add(cleaned.slice(firstBrace, lastBrace + 1));
-  }
-
-  if (firstBracket !== -1) {
-    candidates.add(cleaned.slice(firstBracket));
-  }
-
-  if (firstBracket !== -1 && lastBracket > firstBracket) {
-    candidates.add(cleaned.slice(firstBracket, lastBracket + 1));
-  }
+  if (firstBrace !== -1) candidates.add(cleaned.slice(firstBrace));
+  if (firstBrace !== -1 && lastBrace > firstBrace) candidates.add(cleaned.slice(firstBrace, lastBrace + 1));
+  if (firstBracket !== -1) candidates.add(cleaned.slice(firstBracket));
+  if (firstBracket !== -1 && lastBracket > firstBracket) candidates.add(cleaned.slice(firstBracket, lastBracket + 1));
 
   for (const candidate of candidates) {
     const parsed = tryParseJson(candidate);
@@ -129,12 +138,13 @@ function normalizeParsedResponse(parsed: unknown): AdaptScriptResponse {
 async function callAIWithFallback(
   apiKey: string,
   messages: { role: string; content: string }[],
-  temperature: number
+  temperature: number,
+  maxTokens = PRIMARY_MAX_TOKENS,
 ): Promise<any> {
   const models = [PRIMARY_MODEL, FALLBACK_MODEL];
 
-  for (let i = 0; i < models.length; i++) {
-    const model = models[i];
+  for (let index = 0; index < models.length; index++) {
+    const model = models[index];
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -143,14 +153,14 @@ async function callAIWithFallback(
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           model,
           messages,
           temperature,
-          max_tokens: 12288,
+          max_tokens: maxTokens,
           response_format: { type: "json_object" },
         }),
         signal: controller.signal,
@@ -170,11 +180,11 @@ async function callAIWithFallback(
       }
 
       return await response.json();
-    } catch (e: any) {
+    } catch (error: any) {
       clearTimeout(timer);
-      if (e?.status === 429 || e?.status === 402) throw e;
-      if (i === models.length - 1) throw e;
-      console.warn(`Modelo ${model} falhou, tentando fallback:`, e.message || e);
+      if (error?.status === 429 || error?.status === 402) throw error;
+      if (index === models.length - 1) throw error;
+      console.warn(`Modelo ${model} falhou, tentando fallback:`, error?.message || error);
     }
   }
 }
@@ -209,6 +219,55 @@ Regras obrigatórias:
 - Não escreva texto antes ou depois do JSON.
 - Não inclua outras chaves além de "video_script".`;
 
+const JSON_REPAIR_PROMPT = `Você corrige respostas JSON inválidas.
+
+Retorne APENAS JSON válido no formato:
+{
+  "video_script": [
+    {
+      "time": "MM:SS - MM:SS",
+      "narration": "...",
+      "visual": "..."
+    }
+  ]
+}
+
+Regras obrigatórias:
+- Preserve ao máximo o conteúdo já existente.
+- Não invente conteúdo novo.
+- Se algum item estiver incompleto ou quebrado, remova somente o item incompleto.
+- Não adicione chaves extras.
+- Não escreva explicações.
+- Responda somente com JSON válido.`;
+
+async function parseAdaptScriptResponse(apiKey: string, text: string): Promise<AdaptScriptResponse> {
+  try {
+    return normalizeParsedResponse(extractAndParseJson(text));
+  } catch (parseError) {
+    console.warn(
+      "Primary JSON parse failed, attempting AI repair:",
+      parseError instanceof Error ? parseError.message : parseError,
+    );
+
+    const repairResult = await callAIWithFallback(
+      apiKey,
+      [
+        { role: "system", content: JSON_REPAIR_PROMPT },
+        { role: "user", content: `Conserte este JSON inválido sem inventar conteúdo:\n\n${text}` },
+      ],
+      0,
+      REPAIR_MAX_TOKENS,
+    );
+
+    const repairedText = getMessageContent(repairResult.choices?.[0]?.message?.content);
+    if (!repairedText.trim()) {
+      throw parseError;
+    }
+
+    return normalizeParsedResponse(extractAndParseJson(repairedText));
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -227,7 +286,7 @@ serve(async (req) => {
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      0.3
+      0.3,
     );
 
     const choice = result.choices?.[0];
@@ -244,15 +303,15 @@ serve(async (req) => {
       throw new Error("A resposta da IA foi truncada antes de concluir o JSON. Tente um roteiro menor ou gere em partes.");
     }
 
-    const parsed = normalizeParsedResponse(extractAndParseJson(text));
+    const parsed = await parseAdaptScriptResponse(LOVABLE_API_KEY, text);
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (e: any) {
-    console.error("adapt-script error:", e);
-    const status = e?.status || 500;
-    const message = e?.message || (e instanceof Error ? e.message : "Erro desconhecido");
+  } catch (error: any) {
+    console.error("adapt-script error:", error);
+    const status = error?.status || 500;
+    const message = error?.message || (error instanceof Error ? error.message : "Erro desconhecido");
     return new Response(JSON.stringify({ error: message }), {
       status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
