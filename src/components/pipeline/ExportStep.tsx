@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Download, Image, Volume2, Loader2 } from 'lucide-react';
+import { Download, Volume2, Loader2, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Segment } from '@/types/atlas';
-import { CostEstimateCard } from './CostEstimateCard';
 import JSZip from 'jszip';
 
 interface ExportStepProps {
@@ -10,42 +10,54 @@ interface ExportStepProps {
   segments: Segment[];
 }
 
+function buildPromptsText(segments: Segment[]): string {
+  return segments.map(seg => {
+    const num = String(seg.sequence_number).padStart(2, '0');
+    const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
+    const header = `CENA ${num}: ${seg.narration.slice(0, 60)}`;
+    const subs = subScenes.map(sc =>
+      `  SUBCENA ${num}.${sc.sub_index}: ${sc.image_prompt || '(sem prompt)'}`
+    ).join('\n');
+    return `${header}\n${subs}`;
+  }).join('\n\n');
+}
+
 export function ExportStep({ projectTitle, segments }: ExportStepProps) {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [copied, setCopied] = useState(false);
 
-  const allSubScenes = segments.flatMap(s =>
-    (s.sub_scenes || [])
-  );
-  const imagesReady = allSubScenes.filter(sc => sc.image_status === 'done').length;
+  const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const audiosReady = allSubScenes.filter(sc => sc.audio_status === 'done').length;
-  const totalFiles = imagesReady + audiosReady;
+  const promptsText = buildPromptsText(segments);
+
+  const handleCopyPrompts = async () => {
+    await navigator.clipboard.writeText(promptsText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const handleDownload = async () => {
     setDownloading(true);
-    setProgress({ done: 0, total: totalFiles });
+    const tasks: { url: string; name: string }[] = [];
+    for (const seg of segments) {
+      const num = String(seg.sequence_number).padStart(3, '0');
+      for (const sc of (seg.sub_scenes || [])) {
+        if (sc.audio_url && sc.audio_status === 'done') {
+          tasks.push({ url: sc.audio_url, name: `segment-${num}-sub-${sc.sub_index}.wav` });
+        }
+      }
+    }
+    setProgress({ done: 0, total: tasks.length });
     try {
       const zip = new JSZip();
 
-      // Build list of all files to fetch
-      const tasks: { url: string; name: string }[] = [];
-      for (const seg of segments) {
-        const num = String(seg.sequence_number).padStart(3, '0');
-        for (const sc of (seg.sub_scenes || [])) {
-          if (sc.image_url && sc.image_status === 'done') {
-            tasks.push({ url: sc.image_url, name: `segment-${num}-sub-${sc.sub_index}.png` });
-          }
-          if (sc.audio_url && sc.audio_status === 'done') {
-            tasks.push({ url: sc.audio_url, name: `segment-${num}-sub-${sc.sub_index}.wav` });
-          }
-        }
-      }
+      // Add prompts text file
+      zip.file('prompts.txt', promptsText);
 
-      // Parallel fetch with concurrency limit
       let completed = 0;
       const CONCURRENCY = 6;
       const queue = [...tasks];
-
       const worker = async () => {
         while (queue.length > 0) {
           const task = queue.shift();
@@ -61,7 +73,6 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
           setProgress({ done: completed, total: tasks.length });
         }
       };
-
       await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
       const content = await zip.generateAsync({ type: 'blob' });
@@ -82,10 +93,27 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
     <div className="space-y-6">
       <div className="text-center space-y-2">
         <p className="text-muted-foreground">
-          {imagesReady} imagens · {audiosReady} áudios
+          {audiosReady} áudios · {allSubScenes.length} prompts de imagem
         </p>
       </div>
 
+      {/* Prompts section */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h4 className="text-sm font-medium">Prompts de Imagem</h4>
+          <Button variant="outline" size="sm" onClick={handleCopyPrompts}>
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? 'Copiado!' : 'Copiar Prompts'}
+          </Button>
+        </div>
+        <Textarea
+          readOnly
+          value={promptsText}
+          className="min-h-[200px] font-mono text-xs leading-relaxed"
+        />
+      </div>
+
+      {/* Audio list */}
       <div className="space-y-1 max-h-96 overflow-y-auto">
         {segments.map(seg => {
           const num = String(seg.sequence_number).padStart(3, '0');
@@ -100,8 +128,7 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
               {subScenes.map(sc => (
                 <div key={sc.id} className="flex items-center gap-3 rounded px-6 py-0.5 text-xs text-muted-foreground">
                   <span className="font-mono">sub-{sc.sub_index}</span>
-                  <Image className={`h-3 w-3 ${sc.image_status === 'done' ? 'text-success' : 'text-muted-foreground/40'}`} />
-                  <Volume2 className={`h-3 w-3 ${sc.audio_status === 'done' ? 'text-success' : 'text-muted-foreground/40'}`} />
+                  <Volume2 className={`h-3 w-3 ${sc.audio_status === 'done' ? 'text-green-500' : 'text-muted-foreground/40'}`} />
                   <span className="truncate">{sc.narration_segment.slice(0, 50)}</span>
                 </div>
               ))}
@@ -110,16 +137,11 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
         })}
       </div>
 
-      <CostEstimateCard
-        charCount={allSubScenes.reduce((sc_sum, sc) => sc_sum + (sc.narration_segment?.length || 0), 0)}
-        subSceneCount={allSubScenes.length}
-      />
-
-      <Button className="w-full" size="lg" onClick={handleDownload} disabled={downloading || totalFiles === 0}>
+      <Button className="w-full" size="lg" onClick={handleDownload} disabled={downloading || audiosReady === 0}>
         {downloading ? <Loader2 className="animate-spin" /> : <Download className="h-4 w-4" />}
         {downloading
           ? `Baixando... ${progress.done}/${progress.total}`
-          : `Baixar ZIP (${totalFiles} arquivos)`}
+          : `Baixar ZIP (${audiosReady} áudios + prompts.txt)`}
       </Button>
     </div>
   );

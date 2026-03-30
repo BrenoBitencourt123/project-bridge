@@ -1,21 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Image, Volume2, RefreshCw, Upload, ArrowRight, Loader2, MoreVertical, Pencil } from 'lucide-react';
+import { Volume2, RefreshCw, Upload, ArrowRight, Loader2, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { Project, Segment, SubScene } from '@/types/atlas';
-import { StyleTemplateSelector } from './StyleTemplateSelector';
 import { useToast } from '@/hooks/use-toast';
 import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
 import { findSubSceneCutPoints } from '@/lib/find-cut-points';
 import { AudioImportDialog } from './AudioImportDialog';
-import { AssetReferenceSelector, type AssetReference } from './AssetReferenceSelector';
-import { CostEstimateCard } from './CostEstimateCard';
-import { Badge } from '@/components/ui/badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { MOMENT_TYPE_CONFIG } from '@/types/atlas';
 import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
@@ -27,42 +20,36 @@ interface MediaStepProps {
   onGeneratingChange?: (generating: boolean) => void;
 }
 
-/** Deriva a posição da sub-cena para rotação de ângulo de câmera */
-function deriveSubPosition(subIndex: number, total: number): string {
-  if (subIndex === 1) return 'opening';
-  if (total <= 2) return subIndex === total ? 'closing' : 'middle';
-  if (subIndex === total) return total >= 4 ? 'final' : 'closing';
-  return 'middle';
+function buildPromptsText(segments: Segment[]): string {
+  return segments.map(seg => {
+    const num = String(seg.sequence_number).padStart(2, '0');
+    const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
+    const header = `CENA ${num}: ${seg.narration.slice(0, 60)}`;
+    const subs = subScenes.map(sc =>
+      `  SUBCENA ${num}.${sc.sub_index}: ${sc.image_prompt || '(sem prompt)'}`
+    ).join('\n');
+    return `${header}\n${subs}`;
+  }).join('\n\n');
 }
-
 
 export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange }: MediaStepProps) {
   const { toast } = useToast();
-  const [generatingImages, setGeneratingImages] = useState(false);
   const [generatingAudios, setGeneratingAudios] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
-  const [imageProgress, setImageProgress] = useState(0);
   const [audioProgress, setAudioProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
-  const [genSubSceneId, setGenSubSceneId] = useState<string | null>(null);
-  const [styleTemplateId, setStyleTemplateId] = useState<string | null>(null);
-  const [stylePrefix, setStylePrefix] = useState<string>('');
-  const [styleName, setStyleName] = useState<string>('');
-  const [selectedAssets, setSelectedAssets] = useState<AssetReference[]>([]);
-  const [selectedSubScene, setSelectedSubScene] = useState<{ segment: Segment; subScene: SubScene } | null>(null);
-  const [editingPrompt, setEditingPrompt] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
-  const subScenesDone = allSubScenes.filter(sc => sc.image_status === 'done').length;
   const subAudiosDone = allSubScenes.filter(sc => sc.audio_status === 'done').length;
   const totalSubScenes = allSubScenes.length;
-  const allDone = subScenesDone === totalSubScenes && subAudiosDone === totalSubScenes && totalSubScenes > 0;
+  const allAudiosDone = subAudiosDone === totalSubScenes && totalSubScenes > 0;
 
-  const totalProgress = totalSubScenes > 0 ? ((subScenesDone + subAudiosDone) / (totalSubScenes * 2)) * 100 : 0;
+  const isAnyGenerating = generatingAudios || regenerating || uploadingAudio;
 
-  const isAnyGenerating = generatingImages || generatingAudios || regenerating || uploadingAudio;
+  const promptsText = buildPromptsText(segments);
 
   useEffect(() => {
     const segmentIds = segments.map(s => s.id);
@@ -95,7 +82,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const handleRegeneratePrompts = async () => {
     setRegenerating(true);
     try {
-      // Build payload with sub-scene narrations for per-sub-scene prompt generation
       const segmentPayload = segments.map(s => ({
         narration: s.narration,
         momentType: s.moment_type,
@@ -110,39 +96,23 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       });
       if (error) throw error;
 
-      // Distribute prompts back to sub-scenes
       let promptIdx = 0;
       const updated = segments.map(s => {
         const subScenes = (s.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
         if (subScenes.length === 0) {
-          // No sub-scenes: assign to segment level
           const p = data.prompts[promptIdx++];
-          return {
-            ...s,
-            image_prompt: p?.imagePrompt || s.image_prompt,
-            symbolism: p?.symbolism || s.symbolism,
-          };
+          return { ...s, image_prompt: p?.imagePrompt || s.image_prompt, symbolism: p?.symbolism || s.symbolism };
         }
-        // Assign per sub-scene
         const updatedSubScenes = subScenes.map(sc => {
           const p = data.prompts[promptIdx++];
-          return {
-            ...sc,
-            image_prompt: p?.imagePrompt || sc.image_prompt,
-          };
+          return { ...sc, image_prompt: p?.imagePrompt || sc.image_prompt };
         });
-        // Use first sub-scene's symbolism for the segment
         const firstPrompt = data.prompts[promptIdx - subScenes.length];
-        return {
-          ...s,
-          symbolism: firstPrompt?.symbolism || s.symbolism,
-          sub_scenes: updatedSubScenes,
-        };
+        return { ...s, symbolism: firstPrompt?.symbolism || s.symbolism, sub_scenes: updatedSubScenes };
       });
 
       onSegmentsChange(updated);
 
-      // Persist to DB
       for (const seg of updated) {
         await supabase.from('segments').update({ symbolism: seg.symbolism }).eq('id', seg.id);
         for (const sc of (seg.sub_scenes || [])) {
@@ -157,84 +127,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       toast({ title: 'Erro', description: err.message, variant: 'destructive' });
     } finally {
       setRegenerating(false);
-    }
-  };
-
-
-  const handleGenerateAllImages = async () => {
-    setGeneratingImages(true);
-    onGeneratingChange?.(true);
-    setImageProgress(0);
-    let done = 0;
-
-    const assetPayload = {
-      assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
-      assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
-    };
-
-    for (const seg of segments) {
-      const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
-      const pendingSubs = subScenes.filter(sc => sc.image_status !== 'done');
-
-      if (pendingSubs.length === 0) {
-        done += subScenes.length;
-        setImageProgress((done / totalSubScenes) * 100);
-        continue;
-      }
-
-      // Already done subs count toward progress
-      done += subScenes.length - pendingSubs.length;
-
-      // Generate one image per sub-scene with anti-repetição acumulada
-      const illustrated: string[] = [];
-      for (const sc of pendingSubs) {
-        await generateSingleSubSceneImage(seg, sc, assetPayload, illustrated);
-        if (sc.image_prompt) illustrated.push(sc.image_prompt);
-        done++;
-        setImageProgress((done / totalSubScenes) * 100);
-      }
-    }
-
-    await supabase.from('projects').update({ status: 'images_done', updated_at: new Date().toISOString() }).eq('id', project.id);
-    onUpdate({ status: 'images_done' });
-    setGeneratingImages(false);
-    onGeneratingChange?.(false);
-  };
-
-  const generateSingleSubSceneImage = async (
-    seg: Segment, sc: SubScene,
-    assetPayload: { assetDescriptions: any[]; assetImageUrls: string[] },
-    alreadyIllustrated: string[] = []
-  ) => {
-    const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
-    const total = subScenes.length;
-    const subPosition = deriveSubPosition(sc.sub_index, total);
-
-    updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
-    try {
-      const { data, error } = await supabase.functions.invoke('generate-image', {
-        body: {
-          imagePrompt: sc.image_prompt,
-          narration: sc.narration_segment,
-          projectId: project.id,
-          segmentId: seg.id,
-          sequenceNumber: seg.sequence_number,
-          subIndex: sc.sub_index,
-          subPosition,
-          totalSubScenes: total,
-          alreadyIllustrated,
-          momentType: seg.moment_type,
-          styleName,
-          stylePrefix,
-          ...assetPayload,
-        },
-      });
-      if (error) throw error;
-      updateSubSceneInSegments(seg.id, sc.id, { image_url: data.imageUrl, image_status: 'done' });
-      await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', sc.id);
-    } catch {
-      updateSubSceneInSegments(seg.id, sc.id, { image_status: 'error' });
-      await supabase.from('sub_scenes').update({ image_status: 'error' }).eq('id', sc.id);
     }
   };
 
@@ -340,287 +232,85 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     }
   };
 
-  const handleGenerateSingleImage = async (seg: Segment, sc: SubScene) => {
-    setGenSubSceneId(sc.id);
-    const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
-    const total = subScenes.length;
-    const subPosition = deriveSubPosition(sc.sub_index, total);
-    const alreadyIllustrated = subScenes
-      .filter(s => s.sub_index < sc.sub_index && s.image_status === 'done' && s.image_prompt)
-      .map(s => s.image_prompt!);
-
-    updateSubSceneInSegments(seg.id, sc.id, { image_status: 'generating' });
-    try {
-      const { data, error } = await supabase.functions.invoke('generate-image', {
-        body: {
-          imagePrompt: sc.image_prompt,
-          narration: sc.narration_segment,
-          projectId: project.id,
-          segmentId: seg.id,
-          sequenceNumber: seg.sequence_number,
-          subIndex: sc.sub_index,
-          subPosition,
-          totalSubScenes: total,
-          alreadyIllustrated,
-          momentType: seg.moment_type,
-          styleName,
-          stylePrefix,
-          assetDescriptions: selectedAssets.map(a => ({ name: a.name, description: a.description, category: a.category })),
-          assetImageUrls: selectedAssets.map(a => a.image_url).filter(Boolean),
-        },
-      });
-      if (error) throw error;
-      updateSubSceneInSegments(seg.id, sc.id, { image_url: data.imageUrl, image_status: 'done' });
-      await supabase.from('sub_scenes').update({ image_url: data.imageUrl, image_status: 'done' }).eq('id', sc.id);
-    } catch {
-      updateSubSceneInSegments(seg.id, sc.id, { image_status: 'error' });
-    } finally {
-      setGenSubSceneId(null);
-    }
+  const handleCopyPrompts = async () => {
+    await navigator.clipboard.writeText(promptsText);
+    setCopied(true);
+    toast({ title: 'Prompts copiados!' });
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
     <div className="space-y-4">
-      {/* Compact HUD */}
+      {/* HUD */}
       <div className="sticky top-14 z-40 rounded-lg border bg-card p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-sm">Geração de Mídia</h3>
+            <h3 className="font-semibold text-sm">Mídia & Prompts</h3>
             <p className="text-xs text-muted-foreground">
-              🖼 {subScenesDone}/{totalSubScenes} imagens · 🔊 {subAudiosDone}/{totalSubScenes} áudios
+              🔊 {subAudiosDone}/{totalSubScenes} áudios · 🖼 {totalSubScenes} prompts de imagem
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <AssetReferenceSelector selectedAssets={selectedAssets} onSelectionChange={setSelectedAssets} />
-            <StyleTemplateSelector value={styleTemplateId} onChange={(id, prefix, name) => { setStyleTemplateId(id); setStylePrefix(prefix); setStyleName(name || ''); }} />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={isAnyGenerating}>
-                  {isAnyGenerating ? <Loader2 className="animate-spin h-3 w-3" /> : <MoreVertical className="h-3 w-3" />}
-                  Ações
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={handleRegeneratePrompts} disabled={regenerating}>
-                  <RefreshCw className="h-3 w-3 mr-2" /> Regenerar Prompts
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleGenerateAllImages} disabled={generatingImages}>
-                  <Image className="h-3 w-3 mr-2" /> Gerar Todas Imagens
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleGenerateAllAudios} disabled={generatingAudios}>
-                  <Volume2 className="h-3 w-3 mr-2" /> Gerar Todos Áudios
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setShowImportDialog(true)} disabled={uploadingAudio}>
-                  <Upload className="h-3 w-3 mr-2" /> Enviar Áudio
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button variant="outline" size="sm" onClick={handleRegeneratePrompts} disabled={isAnyGenerating}>
+              {regenerating ? <Loader2 className="animate-spin h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
+              Regenerar Prompts
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleGenerateAllAudios} disabled={isAnyGenerating}>
+              {generatingAudios ? <Loader2 className="animate-spin h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+              Gerar Áudios
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)} disabled={isAnyGenerating}>
+              <Upload className="h-3 w-3" /> Enviar Áudio
+            </Button>
             <AudioImportDialog open={showImportDialog} onOpenChange={setShowImportDialog} onConfirm={handleUploadAudio} />
           </div>
         </div>
 
-        <Progress value={totalProgress} className="h-2" />
-
-        <CostEstimateCard
-          charCount={allSubScenes.reduce((sum, sc) => sum + (sc.narration_segment?.length || 0), 0)}
-          subSceneCount={totalSubScenes}
-        />
-
+        {generatingAudios && <Progress value={audioProgress} className="h-2" />}
         {statusText && <p className="text-xs text-muted-foreground animate-pulse">{statusText}</p>}
 
-        {allDone && (
+        {allAudiosDone && (
           <Button className="w-full" onClick={onNext}>
             Export <ArrowRight className="h-4 w-4" />
           </Button>
         )}
       </div>
 
-      {/* Sub-scene detail modal */}
-      <Dialog open={!!selectedSubScene} onOpenChange={(open) => { if (!open) setSelectedSubScene(null); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {selectedSubScene && (() => {
-            const { segment: modalSeg, subScene: modalSc } = selectedSubScene;
-            // Get latest data from segments state
-            const liveSeg = segments.find(s => s.id === modalSeg.id) || modalSeg;
-            const liveSc = (liveSeg.sub_scenes || []).find(s => s.id === modalSc.id) || modalSc;
-            return (
-              <>
-                <DialogHeader>
-                  <DialogTitle className="text-sm">
-                    Bloco {String(liveSeg.sequence_number).padStart(3, '0')} — Sub-cena {liveSc.sub_index}
-                  </DialogTitle>
-                </DialogHeader>
+      {/* Prompts textarea */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h4 className="text-sm font-medium">Prompts de Imagem</h4>
+          <Button variant="outline" size="sm" onClick={handleCopyPrompts}>
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? 'Copiado!' : 'Copiar Prompts'}
+          </Button>
+        </div>
+        <Textarea
+          readOnly
+          value={promptsText}
+          className="min-h-[300px] font-mono text-xs leading-relaxed"
+        />
+      </div>
 
-                {/* Image */}
-                <div className="aspect-video bg-muted/30 rounded-md overflow-hidden relative">
-                  {liveSc.image_url ? (
-                    <img src={liveSc.image_url} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                      Sem imagem
-                    </div>
-                  )}
-                  {liveSc.image_status === 'generating' && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                      <Loader2 className="animate-spin h-6 w-6 text-white" />
-                    </div>
-                  )}
-                </div>
-
-                {/* Narração */}
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Narração</label>
-                  <p className="text-sm mt-1 p-2 rounded bg-muted/30 border">{liveSc.narration_segment}</p>
-                </div>
-
-                {/* Simbolismo do bloco */}
-                {liveSeg.symbolism && (
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">Simbolismo do bloco</label>
-                    <p className="text-sm mt-1 p-2 rounded bg-muted/30 border">{liveSeg.symbolism}</p>
-                  </div>
-                )}
-
-                {/* Prompt editável */}
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                    <Pencil className="h-3 w-3" /> Prompt da imagem
-                  </label>
-                  <Textarea
-                    className="mt-1 text-sm min-h-[80px]"
-                    value={editingPrompt}
-                    onChange={(e) => setEditingPrompt(e.target.value)}
-                  />
-                </div>
-
-                {/* Áudio */}
-                {liveSc.audio_url && (
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">Áudio</label>
-                    <audio controls src={liveSc.audio_url} className="w-full mt-1" />
-                  </div>
-                )}
-
-                <DialogFooter className="gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={editingPrompt === (liveSc.image_prompt || '')}
-                    onClick={async () => {
-                      updateSubSceneInSegments(liveSeg.id, liveSc.id, { image_prompt: editingPrompt });
-                      await supabase.from('sub_scenes').update({ image_prompt: editingPrompt }).eq('id', liveSc.id);
-                      toast({ title: 'Prompt salvo!' });
-                    }}
-                  >
-                    Salvar Prompt
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={liveSc.image_status === 'generating'}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // Save prompt first if changed
-                      if (editingPrompt !== (liveSc.image_prompt || '')) {
-                        updateSubSceneInSegments(liveSeg.id, liveSc.id, { image_prompt: editingPrompt });
-                        supabase.from('sub_scenes').update({ image_prompt: editingPrompt }).eq('id', liveSc.id);
-                      }
-                      handleGenerateSingleImage(liveSeg, { ...liveSc, image_prompt: editingPrompt });
-                    }}
-                  >
-                    {liveSc.image_status === 'generating' ? (
-                      <><Loader2 className="animate-spin h-3 w-3 mr-1" /> Gerando...</>
-                    ) : liveSc.image_url ? (
-                      <><RefreshCw className="h-3 w-3 mr-1" /> Refazer Imagem</>
-                    ) : (
-                      <><Image className="h-3 w-3 mr-1" /> Gerar Imagem</>
-                    )}
-                  </Button>
-                </DialogFooter>
-              </>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
-
-      {/* Sub-scenes grid view per segment */}
-      <div className="space-y-4">
-        {segments.map((seg) => {
-          const momentCfg = seg.moment_type ? MOMENT_TYPE_CONFIG[seg.moment_type] : null;
+      {/* Audio list per segment */}
+      <div className="space-y-2">
+        {segments.map(seg => {
           const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
-
           return (
             <div key={seg.id} className="rounded-lg border bg-card overflow-hidden">
-              {/* Segment header */}
               <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/30">
                 <span className="text-xs font-mono text-muted-foreground">{String(seg.sequence_number).padStart(3, '0')}</span>
-                {momentCfg && <Badge className={`text-[10px] ${momentCfg.color}`}>{momentCfg.label}</Badge>}
-                <p className="flex-1 text-xs text-muted-foreground line-clamp-1">{seg.narration.slice(0, 80)}...</p>
-                <span className="text-[10px] text-muted-foreground">{subScenes.length} sub-cenas</span>
+                <p className="flex-1 text-xs text-muted-foreground line-clamp-1">{seg.narration.slice(0, 80)}</p>
               </div>
-
-              {/* Sub-scenes grid */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 p-2">
-                {subScenes.map((sc) => {
-                  const isGenThisOne = genSubSceneId === sc.id;
-                  return (
-                    <div
-                      key={sc.id}
-                      className="rounded-md border border-border/50 bg-background overflow-hidden cursor-pointer hover:ring-1 hover:ring-primary/50 transition-all"
-                      onClick={() => { setSelectedSubScene({ segment: seg, subScene: sc }); setEditingPrompt(sc.image_prompt || ''); }}
-                    >
-                      {/* Image area */}
-                      <div className="aspect-video bg-muted/50 relative group">
-                        {sc.image_status === 'generating' && (
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <Loader2 className="animate-spin h-5 w-5 text-muted-foreground" />
-                          </div>
-                        )}
-                        {sc.image_url ? (
-                          <img src={sc.image_url} alt={`Sub ${sc.sub_index}`} className="w-full h-full object-cover" />
-                        ) : sc.image_status !== 'generating' ? (
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs opacity-60 hover:opacity-100"
-                              onClick={() => handleGenerateSingleImage(seg, sc)}
-                              disabled={isGenThisOne}
-                            >
-                              <Image className="h-3 w-3 mr-1" /> Gerar
-                            </Button>
-                          </div>
-                        ) : null}
-                        {/* Regenerate button overlay on existing image */}
-                        {sc.image_url && (
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              className="text-xs"
-                              onClick={() => handleGenerateSingleImage(seg, sc)}
-                              disabled={isGenThisOne}
-                            >
-                              <RefreshCw className="h-3 w-3 mr-1" /> Refazer
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Info */}
-                      <div className="p-1.5 space-y-1">
-                        <div className="flex items-center gap-1">
-                          <Badge variant="outline" className="text-[9px] px-1 py-0">Sub {sc.sub_index}</Badge>
-                          <StatusDot status={sc.image_status} />
-                          <StatusDot status={sc.audio_status} />
-                        </div>
-                        <p className="text-[10px] text-muted-foreground line-clamp-2">{sc.narration_segment}</p>
-                        {sc.audio_url && (
-                          <audio controls src={sc.audio_url} className="w-full h-6" />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="p-2 space-y-1">
+                {subScenes.map(sc => (
+                  <div key={sc.id} className="flex items-center gap-2 px-2 py-1 text-xs">
+                    <span className="font-mono text-muted-foreground">Sub {sc.sub_index}</span>
+                    <StatusDot status={sc.audio_status} />
+                    <span className="flex-1 truncate text-muted-foreground">{sc.narration_segment.slice(0, 60)}</span>
+                    {sc.audio_url && <audio controls src={sc.audio_url} className="h-6 w-48" />}
+                  </div>
+                ))}
               </div>
             </div>
           );
