@@ -1,35 +1,36 @@
 
 
-# Suporte a roteiro pré-estruturado com marcadores de CENA
+# Adaptar com IA respeitando marcadores de CENA
 
-## Resumo
-Quando o usuário colar um roteiro com marcadores tipo `CENA 01 — HOOK`, o sistema reconhece automaticamente as divisões de cena e só precisa criar as sub-cenas dentro de cada cena.
+## Problema
+O `adapt-script` recebe o roteiro inteiro e re-segmenta em blocos de 60-120 palavras, ignorando os marcadores `CENA XX`. O usuário quer que a IA preserve as cenas e apenas crie sub-cenas dentro de cada uma.
 
-## Como funciona hoje
-O `handleSegment` em `SegmentsStep.tsx` ignora qualquer estrutura do texto — agrupa parágrafos consecutivos até ~90 palavras. Isso re-segmenta um roteiro já organizado em cenas.
+## Solução
+Atualizar o prompt do `adapt-script` para reconhecer marcadores de CENA e preservá-los como divisões primárias. Cada CENA vira um segmento; a IA só divide internamente se necessário.
 
 ## Mudanças
 
-### 1. `src/components/pipeline/SegmentsStep.tsx` — Detecção de cenas no roteiro
+### 1. `supabase/functions/adapt-script/index.ts` — Prompt atualizado
+- Detectar no texto se há marcadores `CENA \d+` antes de enviar à IA
+- Se há marcadores: usar um prompt alternativo que instrui a IA a:
+  - Manter cada CENA como um bloco separado (não mesclar cenas)
+  - Preservar a narração de cada cena quase intacta
+  - Gerar o campo `visual` para cada cena
+  - Não re-segmentar o conteúdo entre cenas
+- Se não há marcadores: manter o prompt atual (blocos de 60-120 palavras)
 
-Na função `handleSegment`, antes do agrupamento por palavras:
-- Verificar se o texto contém marcadores de cena (regex: `/^CENA\s+\d+/im`)
-- **Se contém marcadores**: dividir o texto pelos marcadores, cada bloco vira um segmento com o título extraído do marcador
-- **Se não contém marcadores**: manter o comportamento atual (agrupamento por ~90 palavras)
-- Em ambos os casos, as sub-cenas continuam sendo criadas pela mesma lógica `splitIntoSubScenes`
+### 2. `src/components/pipeline/SegmentsStep.tsx` — handleAdapt usa splitIntoSubScenes
+- Nenhuma mudança necessária aqui — o `handleAdapt` já cria sub-cenas via `splitIntoSubScenes` após receber os blocos da IA. Se a IA retorna 7 blocos (1 por cena), o frontend cria as sub-cenas dentro de cada um automaticamente.
 
-A regex reconhecerá variações como:
-- `CENA 01 — HOOK`
-- `CENA 1 - O CONCEITO`
-- `CENA 03:`
-
-### 2. Nenhuma outra mudança necessária
-- A geração de sub-cenas, áudio e prompts continua funcionando igual
-- O `ScriptStep` não precisa mudar — o textarea já aceita texto livre
+## Fluxo resultante
+```text
+Roteiro com CENA → adapt-script (7 blocos, 1 por cena) → frontend splitIntoSubScenes → sub-cenas por cena
+Roteiro sem CENA  → adapt-script (20-35 blocos de ~90 palavras) → frontend splitIntoSubScenes → sub-cenas por bloco
+```
 
 ## Arquivos alterados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/pipeline/SegmentsStep.tsx` | Adicionar detecção de marcadores CENA no `handleSegment` para preservar a estrutura do roteiro |
+| `supabase/functions/adapt-script/index.ts` | Adicionar detecção de marcadores CENA e prompt alternativo que preserva a estrutura de cenas |
 
