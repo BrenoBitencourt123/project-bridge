@@ -292,6 +292,8 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
   const totalSubScenes = segments.reduce((sum, s) => sum + (s.sub_scenes?.length || 0), 0);
   const totalChars = segments.flatMap(s => s.sub_scenes || []).reduce((sum, sc) => sum + (sc.narration_segment?.length || 0), 0);
   const totalWords = project.raw_script?.trim().split(/\s+/).length || 0;
+  const estimatedDurationSec = (totalWords / 167) * 60;
+  const avgSecondsPerSub = totalSubScenes > 0 ? (estimatedDurationSec / totalSubScenes).toFixed(1) : '0';
 
   return (
     <div className="space-y-4">
