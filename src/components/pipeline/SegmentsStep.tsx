@@ -22,10 +22,17 @@ interface SegmentsStepProps {
 async function splitWithAI(
   narration: string,
   sceneTitle?: string,
+  totalWordCount?: number,
+  totalScenes?: number,
 ): Promise<{ narration_segment: string; image_prompt: string | null }[]> {
   try {
     const { data, error } = await supabase.functions.invoke('split-sub-scenes', {
-      body: { narration, scene_title: sceneTitle || null },
+      body: {
+        narration,
+        scene_title: sceneTitle || null,
+        total_word_count: totalWordCount || null,
+        total_scenes: totalScenes || null,
+      },
     });
     if (error) throw error;
     const subs = data?.sub_scenes;
@@ -55,14 +62,14 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
   const { toast } = useToast();
 
   /** Shared logic: given inserted segments, call AI to split each into sub-scenes */
-  async function createSubScenesWithAI(inserted: any[], sceneLabels?: string[]) {
+  async function createSubScenesWithAI(inserted: any[], sceneLabels?: string[], totalWordCount?: number) {
     const allSubScenes: any[] = [];
     for (let idx = 0; idx < inserted.length; idx++) {
       const seg = inserted[idx];
       setProgressMsg(`Dividindo cena ${idx + 1}/${inserted.length} em sub-cenas...`);
       setProgressPct(Math.round(((idx) / inserted.length) * 100));
 
-      const subs = await splitWithAI(seg.narration, sceneLabels?.[idx]);
+      const subs = await splitWithAI(seg.narration, sceneLabels?.[idx], totalWordCount, inserted.length);
       for (let si = 0; si < subs.length; si++) {
         allSubScenes.push({
           segment_id: seg.id,
@@ -183,7 +190,8 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
         .select();
       if (insertErr) throw insertErr;
 
-      const insertedSubScenes = await createSubScenesWithAI(inserted, sceneLabels);
+      const scriptWordCount = project.raw_script?.trim().split(/\s+/).length || 0;
+      const insertedSubScenes = await createSubScenesWithAI(inserted, sceneLabels, scriptWordCount);
       await finalize(inserted, insertedSubScenes);
     } catch (err: any) {
       toast({ title: 'Erro ao segmentar', description: err.message, variant: 'destructive' });
@@ -235,7 +243,8 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
         .select();
       if (insertErr) throw insertErr;
 
-      const insertedSubScenes = await createSubScenesWithAI(inserted);
+      const adaptWordCount = newSegments.reduce((sum, s) => sum + s.narration.split(/\s+/).length, 0);
+      const insertedSubScenes = await createSubScenesWithAI(inserted, undefined, adaptWordCount);
       await finalize(inserted, insertedSubScenes);
     } catch (err: any) {
       toast({ title: 'Erro ao adaptar roteiro', description: err.message, variant: 'destructive' });
@@ -283,6 +292,8 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
   const totalSubScenes = segments.reduce((sum, s) => sum + (s.sub_scenes?.length || 0), 0);
   const totalChars = segments.flatMap(s => s.sub_scenes || []).reduce((sum, sc) => sum + (sc.narration_segment?.length || 0), 0);
   const totalWords = project.raw_script?.trim().split(/\s+/).length || 0;
+  const estimatedDurationSec = (totalWords / 167) * 60;
+  const avgSecondsPerSub = totalSubScenes > 0 ? (estimatedDurationSec / totalSubScenes).toFixed(1) : '0';
 
   return (
     <div className="space-y-4">
@@ -310,7 +321,7 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
       {segments.length > 0 && !isProcessing && (
         <>
           <p className="text-sm text-muted-foreground">
-            {segments.length} blocos · {totalSubScenes} sub-cenas
+            {segments.length} blocos · {totalSubScenes} sub-cenas · ~{avgSecondsPerSub}s/sub-cena · ~{Math.round(estimatedDurationSec / 60)}min estimados
           </p>
           <div className="space-y-2">
             {segments.map((seg, i) => (
