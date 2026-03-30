@@ -71,18 +71,27 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
       }
       await supabase.from('segments').delete().eq('project_id', project.id);
 
-      // Inserir segmentos derivados dos parágrafos
-      const newSegments = paragraphs.map((p, i) => ({
-        project_id: project.id,
-        sequence_number: i + 1,
-        narration: p,
-        image_prompt: null,
-        symbolism: null,
-        moment_type: null,
-        duration_estimate: p.split(/\s+/).length / 3.67,
-        image_status: 'idle' as const,
-        audio_status: 'idle' as const,
-      }));
+      // Inserir segmentos — se tem marcadores, remove a linha do marcador da narração
+      const newSegments = paragraphs.map((p, i) => {
+        let narration = p;
+        if (hasSceneMarkers) {
+          // Remove a primeira linha (marcador) e usa o resto como narração
+          const lines = p.split('\n');
+          narration = lines.slice(1).join('\n').trim();
+          if (!narration) narration = lines[0]; // fallback se só tem o marcador
+        }
+        return {
+          project_id: project.id,
+          sequence_number: i + 1,
+          narration,
+          image_prompt: null,
+          symbolism: null,
+          moment_type: null,
+          duration_estimate: narration.split(/\s+/).length / 3.67,
+          image_status: 'idle' as const,
+          audio_status: 'idle' as const,
+        };
+      });
 
       const { data: inserted, error: insertErr } = await supabase
         .from('segments')
