@@ -22,10 +22,17 @@ interface SegmentsStepProps {
 async function splitWithAI(
   narration: string,
   sceneTitle?: string,
+  totalWordCount?: number,
+  totalScenes?: number,
 ): Promise<{ narration_segment: string; image_prompt: string | null }[]> {
   try {
     const { data, error } = await supabase.functions.invoke('split-sub-scenes', {
-      body: { narration, scene_title: sceneTitle || null },
+      body: {
+        narration,
+        scene_title: sceneTitle || null,
+        total_word_count: totalWordCount || null,
+        total_scenes: totalScenes || null,
+      },
     });
     if (error) throw error;
     const subs = data?.sub_scenes;
