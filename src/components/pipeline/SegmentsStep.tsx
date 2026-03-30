@@ -147,6 +147,13 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
 
   const handleAdapt = async () => {
     if (!project.raw_script) return;
+
+    // Se o roteiro já tem marcadores de CENA, pular a IA e usar parsing local
+    const hasSceneMarkers = /^CENA\s+\d+/im.test(project.raw_script);
+    if (hasSceneMarkers) {
+      return handleSegment();
+    }
+
     setAdapting(true);
     try {
       const { data, error } = await supabase.functions.invoke('adapt-script', {
