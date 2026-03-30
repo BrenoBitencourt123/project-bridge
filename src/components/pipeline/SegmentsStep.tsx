@@ -24,12 +24,14 @@ async function splitWithAI(
   sceneTitle?: string,
   totalWordCount?: number,
   totalScenes?: number,
+  sceneFunction?: string,
 ): Promise<{ narration_segment: string; image_prompt: string | null }[]> {
   try {
     const { data, error } = await supabase.functions.invoke('split-sub-scenes', {
       body: {
         narration,
         scene_title: sceneTitle || null,
+        scene_function: sceneFunction || null,
         total_word_count: totalWordCount || null,
         total_scenes: totalScenes || null,
       },
@@ -37,7 +39,7 @@ async function splitWithAI(
     if (error) throw error;
     const subs = data?.sub_scenes;
     if (Array.isArray(subs) && subs.length > 0) {
-      return subs.map((s: any, i: number) => ({
+      return subs.map((s: any) => ({
         narration_segment: s.narration_segment,
         image_prompt: s.image_prompt || null,
       }));
