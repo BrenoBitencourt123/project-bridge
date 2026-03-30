@@ -5,15 +5,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const PRIMARY_MODEL = "google/gemini-2.5-flash";
-const FALLBACK_MODEL = "google/gemini-2.5-flash-lite";
+const PRIMARY_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-2.5-flash-lite";
 const TIMEOUT_MS = 55_000;
 
 async function callWithTimeout(body: object, apiKey: string, timeoutMs: number): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -41,8 +41,8 @@ serve(async (req) => {
     const { segments } = await req.json();
     if (!segments?.length) throw new Error("Segments required");
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
+    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY not configured");
 
     // Build a flat list of sub-scenes with their context
     const subSceneList: string[] = [];
@@ -118,7 +118,7 @@ Total esperado: ${flatIdx} prompts (um por sub-cena).`;
     try {
       const result = await callWithTimeout(
         { model: PRIMARY_MODEL, messages, tools, tool_choice: { type: "function", function: { name: "return_prompts" } } },
-        LOVABLE_API_KEY,
+        GOOGLE_AI_API_KEY,
         TIMEOUT_MS,
       );
       const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
@@ -127,7 +127,7 @@ Total esperado: ${flatIdx} prompts (um por sub-cena).`;
       console.warn("Primary model failed, trying fallback:", primaryErr);
       const result = await callWithTimeout(
         { model: FALLBACK_MODEL, messages, tools, tool_choice: { type: "function", function: { name: "return_prompts" } } },
-        LOVABLE_API_KEY,
+        GOOGLE_AI_API_KEY,
         TIMEOUT_MS,
       );
       const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
