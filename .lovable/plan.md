@@ -1,56 +1,41 @@
 
 
-# Divisão inteligente de sub-cenas via IA
+# Reformular prompt da edge function `split-sub-scenes` para densidade visual alta (~42 subcenas)
 
-## Problema atual
-O `splitIntoSubScenes` divide mecanicamente por contagem de palavras e pontuação. Isso gera sub-cenas que não respeitam mudanças de ideia, visual ou raciocínio — resultando em áudios longos demais ou cortes no meio de um conceito.
+## Problema
+O prompt atual da edge function `split-sub-scenes` gera sub-cenas conservadoras (15-35 palavras, ~25 subcenas para 6min). O GPT com seu prompt detalhado gera ~42 subcenas porque usa critérios mais granulares: separa contrastes, passos de cálculo, erro vs correção, pergunta vs resposta, etc.
 
 ## Solução
-Substituir a divisão mecânica por uma chamada à IA que analisa o conteúdo semanticamente e divide cada cena em sub-cenas baseadas nos critérios que você definiu:
-- Mudança de foco da explicação
-- Mudança de imagem ideal
-- Mudança de exemplo
-- Nova informação que precisa respirar
-- Virada de raciocínio
+Reescrever o `SYSTEM_PROMPT` da edge function com toda a lógica detalhada que você definiu, incluindo:
+- Os 7 gatilhos de corte (foco, visual, exemplo, contraste, cálculo, erro/correção, comparação)
+- Meta de densidade: `targetSubscenes = round(estimatedDurationSec / 8.5)` → 42 para 6min
+- Faixa de palavras por subcena: 12-32 (max 38)
+- Exemplos concretos de pensamento correto
+- Heurística de second pass: se `subsceneCount < target * 0.9`, reprocessar com maior granularidade
 
-## Fluxo
-
-```text
-Roteiro com CENA → parse local (7 cenas) → IA divide cada cena em sub-cenas semânticas
-Roteiro sem CENA → adapt-script (cria cenas) → IA divide cada cena em sub-cenas semânticas
-```
+Além disso, passar o `wordCount` total do roteiro na chamada para que a IA saiba a meta de densidade.
 
 ## Mudanças
 
-### 1. Nova edge function `split-sub-scenes` 
-Uma função dedicada que recebe a narração de UMA cena e retorna as sub-cenas. O prompt inclui todos os seus critérios:
+### 1. `supabase/functions/split-sub-scenes/index.ts`
+- Reescrever o `SYSTEM_PROMPT` com todos os critérios detalhados do seu prompt
+- Aceitar novo parâmetro `total_word_count` no body para calcular `targetSubscenes`
+- Incluir no user message: a meta de subcenas para esta cena (proporcional ao total)
+- Aumentar `max_tokens` para 16384 (mais subcenas = mais output)
+- Adicionar validação pós-IA: se subcenas geradas < esperado, incluir instrução de "maior granularidade" no prompt
 
-- Cada sub-cena = 1 ideia + 1 imagem + 1 trecho de áudio
-- Cortar quando muda o foco, o visual, o exemplo ou o raciocínio
-- Cada sub-cena deve caber em ~7-12 segundos de áudio (15-30 palavras)
-- Gerar o `image_prompt` para cada sub-cena já nesta etapa
+### 2. `src/components/pipeline/SegmentsStep.tsx`
+- Passar `total_word_count` do roteiro completo na chamada `splitWithAI`
+- Passar `total_scenes` para que a IA distribua a meta proporcional
+- Atualizar a exibição de stats: mostrar também média de segundos/subcena
 
-Retorna JSON: `{ sub_scenes: [{ narration_segment, image_prompt }] }`
-
-### 2. `src/components/pipeline/SegmentsStep.tsx` — Chamar a nova função
-Após criar os segmentos (tanto via `handleSegment` quanto `handleAdapt`):
-- Em vez de chamar `splitIntoSubScenes` localmente, chamar a edge function `split-sub-scenes` para cada segmento
-- Mostrar progresso: "Dividindo cena 3/7 em sub-cenas..."
-- Os prompts de imagem já vêm preenchidos (resolve o problema de prompts vazios)
-
-### 3. `src/lib/split-sub-scenes.ts` — Mantido como fallback
-A função local continua existindo como fallback caso a IA falhe em algum segmento.
-
-## Resultado
-- Sub-cenas divididas por significado, não por contagem de palavras
-- Prompts de imagem gerados automaticamente na segmentação
-- Cada sub-cena acompanha um passo mental do aluno
-- Áudios de ~7-12s por sub-cena, sem surpresas de 2 minutos
-
-## Arquivos
+## Resultado esperado
+- Roteiro de ~1000 palavras (6min) → ~42 subcenas em vez de ~25
+- Cada subcena = 1 ideia + 1 imagem + ~8.5s de áudio
+- Cortes semânticos por contraste, cálculo, erro/correção, etc.
 
 | Arquivo | Mudança |
 |---|---|
-| `supabase/functions/split-sub-scenes/index.ts` | Nova edge function com prompt semântico para dividir cenas em sub-cenas |
-| `src/components/pipeline/SegmentsStep.tsx` | Substituir `splitIntoSubScenes` local pela chamada à edge function + progresso |
+| `supabase/functions/split-sub-scenes/index.ts` | Reescrever prompt com critérios detalhados + meta de densidade + validação |
+| `src/components/pipeline/SegmentsStep.tsx` | Passar word count total e scene count para a edge function |
 
