@@ -323,7 +323,6 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
           <p className="text-sm text-muted-foreground">
             {segments.length} blocos · {totalSubScenes} sub-cenas · ~{avgSecondsPerSub}s/sub-cena · ~{Math.round(estimatedDurationSec / 60)}min estimados
           </p>
-          </p>
           <div className="space-y-2">
             {segments.map((seg, i) => (
               <SegmentCard key={seg.id} segment={seg} onUpdate={updates => updateSegmentLocal(i, updates)} />
