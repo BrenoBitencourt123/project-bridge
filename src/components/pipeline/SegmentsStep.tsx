@@ -26,28 +26,43 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
     if (!project.raw_script) return;
     setSegmenting(true);
     try {
-      // Parsing local — agrupa parágrafos até ~80-100 palavras por bloco
-      const rawParagraphs = project.raw_script
-        .split(/\n\n+/)
-        .map(p => p.trim())
-        .filter(p => p.length > 0);
+      // Detectar se o roteiro já tem marcadores de CENA
+      const sceneMarkerRegex = /^CENA\s+\d+/im;
+      const hasSceneMarkers = sceneMarkerRegex.test(project.raw_script);
 
-      const TARGET_WORDS = 90;
-      const paragraphs: string[] = [];
-      let buffer = '';
-      let bufferWords = 0;
-      for (const p of rawParagraphs) {
-        const pWords = p.split(/\s+/).length;
-        if (buffer && bufferWords + pWords > TARGET_WORDS * 1.2) {
-          paragraphs.push(buffer);
-          buffer = p;
-          bufferWords = pWords;
-        } else {
-          buffer = buffer ? `${buffer}\n\n${p}` : p;
-          bufferWords += pWords;
+      let paragraphs: string[];
+
+      if (hasSceneMarkers) {
+        // Dividir pelos marcadores de CENA, preservando a estrutura do usuário
+        const splitRegex = /^(?=CENA\s+\d+)/im;
+        paragraphs = project.raw_script
+          .split(splitRegex)
+          .map(block => block.trim())
+          .filter(block => block.length > 0);
+      } else {
+        // Fallback: agrupa parágrafos até ~90 palavras por bloco
+        const rawParagraphs = project.raw_script
+          .split(/\n\n+/)
+          .map(p => p.trim())
+          .filter(p => p.length > 0);
+
+        const TARGET_WORDS = 90;
+        paragraphs = [];
+        let buffer = '';
+        let bufferWords = 0;
+        for (const p of rawParagraphs) {
+          const pWords = p.split(/\s+/).length;
+          if (buffer && bufferWords + pWords > TARGET_WORDS * 1.2) {
+            paragraphs.push(buffer);
+            buffer = p;
+            bufferWords = pWords;
+          } else {
+            buffer = buffer ? `${buffer}\n\n${p}` : p;
+            bufferWords += pWords;
+          }
         }
+        if (buffer) paragraphs.push(buffer);
       }
-      if (buffer) paragraphs.push(buffer);
 
       // Deletar sub-cenas e segmentos existentes
       const existingSegmentIds = segments.map(s => s.id);
@@ -56,18 +71,27 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
       }
       await supabase.from('segments').delete().eq('project_id', project.id);
 
-      // Inserir segmentos derivados dos parágrafos
-      const newSegments = paragraphs.map((p, i) => ({
-        project_id: project.id,
-        sequence_number: i + 1,
-        narration: p,
-        image_prompt: null,
-        symbolism: null,
-        moment_type: null,
-        duration_estimate: p.split(/\s+/).length / 3.67,
-        image_status: 'idle' as const,
-        audio_status: 'idle' as const,
-      }));
+      // Inserir segmentos — se tem marcadores, remove a linha do marcador da narração
+      const newSegments = paragraphs.map((p, i) => {
+        let narration = p;
+        if (hasSceneMarkers) {
+          // Remove a primeira linha (marcador) e usa o resto como narração
+          const lines = p.split('\n');
+          narration = lines.slice(1).join('\n').trim();
+          if (!narration) narration = lines[0]; // fallback se só tem o marcador
+        }
+        return {
+          project_id: project.id,
+          sequence_number: i + 1,
+          narration,
+          image_prompt: null,
+          symbolism: null,
+          moment_type: null,
+          duration_estimate: narration.split(/\s+/).length / 3.67,
+          image_status: 'idle' as const,
+          audio_status: 'idle' as const,
+        };
+      });
 
       const { data: inserted, error: insertErr } = await supabase
         .from('segments')
