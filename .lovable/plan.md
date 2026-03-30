@@ -1,28 +1,56 @@
 
 
-# Adaptar com IA: pular chamada à IA quando roteiro já tem CENA
+# Divisão inteligente de sub-cenas via IA
 
-## Problema
-Quando o roteiro já vem com marcadores `CENA 01`, `CENA 02`, etc., o botão "Adaptar com IA" ainda chama a edge function `adapt-script` para re-segmentar — desnecessário, já que as cenas já estão definidas. O sistema só precisa criar as sub-cenas dentro de cada cena.
+## Problema atual
+O `splitIntoSubScenes` divide mecanicamente por contagem de palavras e pontuação. Isso gera sub-cenas que não respeitam mudanças de ideia, visual ou raciocínio — resultando em áudios longos demais ou cortes no meio de um conceito.
 
 ## Solução
-No `handleAdapt` de `SegmentsStep.tsx`, detectar marcadores de CENA. Se existirem, **pular a chamada à edge function** e usar a mesma lógica local do `handleSegment` (dividir pelos marcadores + `splitIntoSubScenes`). Se não existirem, manter o fluxo atual com a IA.
+Substituir a divisão mecânica por uma chamada à IA que analisa o conteúdo semanticamente e divide cada cena em sub-cenas baseadas nos critérios que você definiu:
+- Mudança de foco da explicação
+- Mudança de imagem ideal
+- Mudança de exemplo
+- Nova informação que precisa respirar
+- Virada de raciocínio
 
-## Mudança
+## Fluxo
 
-### `src/components/pipeline/SegmentsStep.tsx`
-No início do `handleAdapt`:
-1. Verificar se `project.raw_script` contém marcadores `CENA \d+`
-2. **Se sim**: reutilizar a lógica de parsing local (split pelos marcadores, remover linha do marcador, criar segmentos e sub-cenas) — idêntico ao que `handleSegment` já faz no branch `hasSceneMarkers`
-3. **Se não**: manter o fluxo atual (chamar `adapt-script` e processar resposta da IA)
+```text
+Roteiro com CENA → parse local (7 cenas) → IA divide cada cena em sub-cenas semânticas
+Roteiro sem CENA → adapt-script (cria cenas) → IA divide cada cena em sub-cenas semânticas
+```
 
-Na prática, extrair a lógica de "parse marcadores → criar segmentos → sub-cenas" para uma função compartilhada que tanto `handleSegment` quanto `handleAdapt` usam quando detectam marcadores.
+## Mudanças
+
+### 1. Nova edge function `split-sub-scenes` 
+Uma função dedicada que recebe a narração de UMA cena e retorna as sub-cenas. O prompt inclui todos os seus critérios:
+
+- Cada sub-cena = 1 ideia + 1 imagem + 1 trecho de áudio
+- Cortar quando muda o foco, o visual, o exemplo ou o raciocínio
+- Cada sub-cena deve caber em ~7-12 segundos de áudio (15-30 palavras)
+- Gerar o `image_prompt` para cada sub-cena já nesta etapa
+
+Retorna JSON: `{ sub_scenes: [{ narration_segment, image_prompt }] }`
+
+### 2. `src/components/pipeline/SegmentsStep.tsx` — Chamar a nova função
+Após criar os segmentos (tanto via `handleSegment` quanto `handleAdapt`):
+- Em vez de chamar `splitIntoSubScenes` localmente, chamar a edge function `split-sub-scenes` para cada segmento
+- Mostrar progresso: "Dividindo cena 3/7 em sub-cenas..."
+- Os prompts de imagem já vêm preenchidos (resolve o problema de prompts vazios)
+
+### 3. `src/lib/split-sub-scenes.ts` — Mantido como fallback
+A função local continua existindo como fallback caso a IA falhe em algum segmento.
 
 ## Resultado
-- Roteiro com `CENA XX`: ambos botões funcionam localmente, sem chamar IA
-- Roteiro sem marcadores: "Segmentar por parágrafos" = local, "Adaptar com IA" = chama edge function
+- Sub-cenas divididas por significado, não por contagem de palavras
+- Prompts de imagem gerados automaticamente na segmentação
+- Cada sub-cena acompanha um passo mental do aluno
+- Áudios de ~7-12s por sub-cena, sem surpresas de 2 minutos
+
+## Arquivos
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/pipeline/SegmentsStep.tsx` | Adicionar detecção de CENA no `handleAdapt` para pular a chamada à IA e usar parsing local |
+| `supabase/functions/split-sub-scenes/index.ts` | Nova edge function com prompt semântico para dividir cenas em sub-cenas |
+| `src/components/pipeline/SegmentsStep.tsx` | Substituir `splitIntoSubScenes` local pela chamada à edge function + progresso |
 
