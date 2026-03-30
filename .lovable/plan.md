@@ -1,36 +1,28 @@
 
 
-# Adaptar com IA respeitando marcadores de CENA
+# Adaptar com IA: pular chamada à IA quando roteiro já tem CENA
 
 ## Problema
-O `adapt-script` recebe o roteiro inteiro e re-segmenta em blocos de 60-120 palavras, ignorando os marcadores `CENA XX`. O usuário quer que a IA preserve as cenas e apenas crie sub-cenas dentro de cada uma.
+Quando o roteiro já vem com marcadores `CENA 01`, `CENA 02`, etc., o botão "Adaptar com IA" ainda chama a edge function `adapt-script` para re-segmentar — desnecessário, já que as cenas já estão definidas. O sistema só precisa criar as sub-cenas dentro de cada cena.
 
 ## Solução
-Atualizar o prompt do `adapt-script` para reconhecer marcadores de CENA e preservá-los como divisões primárias. Cada CENA vira um segmento; a IA só divide internamente se necessário.
+No `handleAdapt` de `SegmentsStep.tsx`, detectar marcadores de CENA. Se existirem, **pular a chamada à edge function** e usar a mesma lógica local do `handleSegment` (dividir pelos marcadores + `splitIntoSubScenes`). Se não existirem, manter o fluxo atual com a IA.
 
-## Mudanças
+## Mudança
 
-### 1. `supabase/functions/adapt-script/index.ts` — Prompt atualizado
-- Detectar no texto se há marcadores `CENA \d+` antes de enviar à IA
-- Se há marcadores: usar um prompt alternativo que instrui a IA a:
-  - Manter cada CENA como um bloco separado (não mesclar cenas)
-  - Preservar a narração de cada cena quase intacta
-  - Gerar o campo `visual` para cada cena
-  - Não re-segmentar o conteúdo entre cenas
-- Se não há marcadores: manter o prompt atual (blocos de 60-120 palavras)
+### `src/components/pipeline/SegmentsStep.tsx`
+No início do `handleAdapt`:
+1. Verificar se `project.raw_script` contém marcadores `CENA \d+`
+2. **Se sim**: reutilizar a lógica de parsing local (split pelos marcadores, remover linha do marcador, criar segmentos e sub-cenas) — idêntico ao que `handleSegment` já faz no branch `hasSceneMarkers`
+3. **Se não**: manter o fluxo atual (chamar `adapt-script` e processar resposta da IA)
 
-### 2. `src/components/pipeline/SegmentsStep.tsx` — handleAdapt usa splitIntoSubScenes
-- Nenhuma mudança necessária aqui — o `handleAdapt` já cria sub-cenas via `splitIntoSubScenes` após receber os blocos da IA. Se a IA retorna 7 blocos (1 por cena), o frontend cria as sub-cenas dentro de cada um automaticamente.
+Na prática, extrair a lógica de "parse marcadores → criar segmentos → sub-cenas" para uma função compartilhada que tanto `handleSegment` quanto `handleAdapt` usam quando detectam marcadores.
 
-## Fluxo resultante
-```text
-Roteiro com CENA → adapt-script (7 blocos, 1 por cena) → frontend splitIntoSubScenes → sub-cenas por cena
-Roteiro sem CENA  → adapt-script (20-35 blocos de ~90 palavras) → frontend splitIntoSubScenes → sub-cenas por bloco
-```
-
-## Arquivos alterados
+## Resultado
+- Roteiro com `CENA XX`: ambos botões funcionam localmente, sem chamar IA
+- Roteiro sem marcadores: "Segmentar por parágrafos" = local, "Adaptar com IA" = chama edge function
 
 | Arquivo | Mudança |
 |---|---|
-| `supabase/functions/adapt-script/index.ts` | Adicionar detecção de marcadores CENA e prompt alternativo que preserva a estrutura de cenas |
+| `src/components/pipeline/SegmentsStep.tsx` | Adicionar detecção de CENA no `handleAdapt` para pular a chamada à IA e usar parsing local |
 
