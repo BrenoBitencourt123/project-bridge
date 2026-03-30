@@ -220,30 +220,34 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
 
     setAdapting(true);
     try {
-      setProgressMsg('Adaptando roteiro com IA...');
+      setProgressMsg('Adaptando roteiro com IA (macroblocos narrativos)...');
       const { data, error } = await supabase.functions.invoke('adapt-script', {
         body: { script: project.raw_script },
       });
       if (error) throw error;
 
-      const videoScript: { time: string; narration: string; visual: string }[] = data.video_script || [];
+      const videoScript: { time: string; narration: string; visual: string; scene_function?: string }[] = data.video_script || [];
       if (videoScript.length === 0) throw new Error('A IA não retornou blocos de cena');
 
       await deleteExisting();
 
+      const sceneFunctions: string[] = [];
       const newSegments = videoScript
         .filter(b => b.narration && b.narration.trim().length > 0)
-        .map((b, i) => ({
-          project_id: project.id,
-          sequence_number: i + 1,
-          narration: b.narration.trim(),
-          image_prompt: b.visual?.trim() || null,
-          symbolism: null,
-          moment_type: null,
-          duration_estimate: b.narration.trim().split(/\s+/).length / 3.67,
-          image_status: 'idle' as const,
-          audio_status: 'idle' as const,
-        }));
+        .map((b, i) => {
+          sceneFunctions.push(b.scene_function || 'conceito');
+          return {
+            project_id: project.id,
+            sequence_number: i + 1,
+            narration: b.narration.trim(),
+            image_prompt: b.visual?.trim() || null,
+            symbolism: null,
+            moment_type: null,
+            duration_estimate: b.narration.trim().split(/\s+/).length / 3.67,
+            image_status: 'idle' as const,
+            audio_status: 'idle' as const,
+          };
+        });
 
       const { data: inserted, error: insertErr } = await supabase
         .from('segments')
@@ -252,7 +256,7 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
       if (insertErr) throw insertErr;
 
       const adaptWordCount = newSegments.reduce((sum, s) => sum + s.narration.split(/\s+/).length, 0);
-      const insertedSubScenes = await createSubScenesWithAI(inserted, undefined, adaptWordCount);
+      const insertedSubScenes = await createSubScenesWithAI(inserted, undefined, adaptWordCount, sceneFunctions);
       await finalize(inserted, insertedSubScenes);
     } catch (err: any) {
       toast({ title: 'Erro ao adaptar roteiro', description: err.message, variant: 'destructive' });
