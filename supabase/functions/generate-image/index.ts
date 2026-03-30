@@ -8,8 +8,8 @@ const corsHeaders = {
 };
 
 const TIMEOUT_MS = 55_000;
-const PRIMARY_MODEL = "google/gemini-3-pro-image-preview";
-const FALLBACK_MODEL = "google/gemini-3.1-flash-image-preview";
+const PRIMARY_MODEL = "gemini-3-pro-image-preview";
+const FALLBACK_MODEL = "gemini-3.1-flash-image-preview";
 
 // Paletas de estilo fixas — garantem consistência visual em todo o vídeo
 const STYLE_PROMPTS: Record<string, string> = {
@@ -100,7 +100,7 @@ async function callImageAIWithFallback(
 
     try {
       console.log(`Trying image model: ${model}`);
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${apiKey}`,
@@ -177,8 +177,8 @@ serve(async (req) => {
 
     if (!imagePrompt || !projectId) throw new Error("imagePrompt and projectId required");
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
+    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY not configured");
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -252,7 +252,7 @@ ${subSceneLabel}Cena: ${imagePrompt}`;
     }
 
     // Call AI with fallback
-    const base64Data = await callImageAIWithFallback(LOVABLE_API_KEY, contentParts);
+    const base64Data = await callImageAIWithFallback(GOOGLE_AI_API_KEY, contentParts);
 
     const imageBytes = base64Decode(base64Data);
     const num = String(sequenceNumber).padStart(3, "0");

@@ -6,8 +6,8 @@ const corsHeaders = {
 };
 
 const TIMEOUT_MS = 55_000;
-const PRIMARY_MODEL = "google/gemini-2.5-flash";
-const FALLBACK_MODEL = "google/gemini-2.5-flash-lite";
+const PRIMARY_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-2.5-flash-lite";
 
 function repairJson(json: string): string {
   let braces = 0, brackets = 0;
@@ -55,7 +55,7 @@ async function callAIWithFallback(
 
     try {
       console.log(`Trying model: ${model}`);
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${apiKey}`,
@@ -97,8 +97,8 @@ serve(async (req) => {
     const { script } = await req.json();
     if (!script) throw new Error("Script is required");
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
+    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY not configured");
 
     const prompt = `Você é um segmentador de roteiros para vídeos educacionais. Divida o roteiro abaixo em BLOCOS de narração.
 
@@ -140,7 +140,7 @@ Responda APENAS com um JSON válido no formato:
 {"segments": [{"narration": "...", "imagePrompt": "...", "symbolism": "...", "momentType": "...", "maxSubScenes": 1}]}`;
 
     const result = await callAIWithFallback(
-      LOVABLE_API_KEY,
+      GOOGLE_AI_API_KEY,
       [
         { role: "system", content: "You are a JSON-only response bot. Always respond with valid JSON." },
         { role: "user", content: prompt },

@@ -5,15 +5,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const PRIMARY_MODEL = "google/gemini-2.5-flash";
-const FALLBACK_MODEL = "google/gemini-2.5-flash-lite";
+const PRIMARY_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-2.5-flash-lite";
 const TIMEOUT_MS = 55_000;
 
 async function callWithTimeout(body: object, apiKey: string, timeoutMs: number): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -63,8 +63,8 @@ serve(async (req) => {
 
   try {
     const { freePrompt, subject, topic, difficulty, targetDuration } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
+    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY not configured");
 
     const duration = targetDuration || 10;
     const wordTarget = duration * 220;
@@ -110,14 +110,14 @@ REGRAS PARA OTIMIZAÇÃO VISUAL (segmentação e imagens):
     try {
       result = await callWithTimeout(
         { model: PRIMARY_MODEL, messages, temperature: 0.7, max_tokens: 8192 },
-        LOVABLE_API_KEY,
+        GOOGLE_AI_API_KEY,
         TIMEOUT_MS,
       );
     } catch (primaryErr) {
       console.warn("Primary model failed, trying fallback:", primaryErr);
       result = await callWithTimeout(
         { model: FALLBACK_MODEL, messages, temperature: 0.7, max_tokens: 8192 },
-        LOVABLE_API_KEY,
+        GOOGLE_AI_API_KEY,
         TIMEOUT_MS,
       );
     }

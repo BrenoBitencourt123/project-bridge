@@ -6,8 +6,8 @@ const corsHeaders = {
 };
 
 const TIMEOUT_MS = 55_000;
-const PRIMARY_MODEL = "google/gemini-2.5-flash";
-const FALLBACK_MODEL = "google/gemini-2.5-flash-lite";
+const PRIMARY_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-2.5-flash-lite";
 const PRIMARY_MAX_TOKENS = 16_384;
 const REPAIR_MAX_TOKENS = 12_288;
 
@@ -150,7 +150,7 @@ async function callAIWithFallback(
 
     try {
       console.log(`Trying model: ${model}`);
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -275,13 +275,13 @@ serve(async (req) => {
     const { script } = await req.json();
     if (!script || !script.trim()) throw new Error("Roteiro é obrigatório");
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY não configurada");
+    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
+    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY não configurada");
 
     const userMessage = `ROTEIRO BRUTO:\n\n${script.trim()}`;
 
     const result = await callAIWithFallback(
-      LOVABLE_API_KEY,
+      GOOGLE_AI_API_KEY,
       [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
@@ -303,7 +303,7 @@ serve(async (req) => {
       throw new Error("A resposta da IA foi truncada antes de concluir o JSON. Tente um roteiro menor ou gere em partes.");
     }
 
-    const parsed = await parseAdaptScriptResponse(LOVABLE_API_KEY, text);
+    const parsed = await parseAdaptScriptResponse(GOOGLE_AI_API_KEY, text);
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
