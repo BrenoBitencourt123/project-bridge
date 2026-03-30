@@ -100,11 +100,32 @@ Cada "passo mental" do aluno deve ser uma sub-cena.
 - NUNCA gere sub-cena com menos de 8 palavras — junte com anterior ou próximo
 - Se um trecho tiver mais de 38 palavras, DIVIDA em duas sub-cenas
 
-## REGRAS DO image_prompt
-- Em português, concreto e visual
-- Descreva EXATAMENTE o que apareceria na tela
-- Seja específico: "aluno olhando para prova do ENEM com expressão de dúvida" > "aluno estudando"
-- Cada sub-cena DEVE ter um image_prompt único
+## REGRAS DO image_prompt (CRÍTICO — LEIA COM ATENÇÃO)
+Cada image_prompt deve ser um PARÁGRAFO DESCRITIVO de 2-4 frases em português.
+Ele será usado para gerar a imagem da sub-cena. Quanto mais detalhado, melhor.
+
+ESTRUTURA OBRIGATÓRIA do image_prompt:
+1. COMPOSIÇÃO: tipo de enquadramento (close-up, plano aberto, vista aérea, split-screen, over-the-shoulder)
+2. SUJEITO: quem/o quê aparece, com detalhes (idade, expressão, postura, roupa, cor)
+3. CENÁRIO: onde acontece (sala de aula, quadro-negro, tela de computador, mesa de estudos, cenário abstrato)
+4. ELEMENTOS VISUAIS: objetos, gráficos, números, fórmulas, setas, destaques, cores dominantes
+5. ATMOSFERA: iluminação, tom emocional, estilo visual (educativo moderno, minimalista, infográfico, cinematográfico)
+
+EXEMPLOS DE BOA QUALIDADE:
+- "Close-up de mão de estudante segurando uma urna transparente com 5 bolas coloridas (3 azuis, 2 vermelhas). Fundo desfocado de sala de aula. Iluminação suave lateral. Uma seta amarela aponta para as bolas azuis com o texto '3/5' flutuando ao lado."
+- "Split-screen vertical: lado esquerdo mostra cálculo errado riscado em vermelho com X grande; lado direito mostra cálculo correto em verde com checkmark. Fundo escuro estilo quadro-negro. Números grandes e legíveis."
+- "Plano médio de adolescente sentado em mesa de estudos, expressão de 'eureka' com lâmpada acesa sobre a cabeça. Caderno aberto com fórmula P = n(A)/n(S) destacada em amarelo. Estilo ilustração educativa flat design."
+
+EXEMPLOS RUINS (NÃO FAÇA ISSO):
+- "probabilidade" ← muito vago
+- "aluno estudando" ← genérico demais
+- "gráfico de probabilidade" ← sem detalhes visuais
+
+REGRAS:
+- Cada sub-cena DEVE ter um image_prompt único e diferente dos demais
+- O prompt deve ser autocontido — alguém que não leu o roteiro deve conseguir gerar a imagem
+- Inclua cores, posições, expressões, textos na tela quando relevante
+- Para conceitos abstratos, descreva uma METÁFORA VISUAL concreta
 
 ## FORMATO DE RESPOSTA
 Retorne APENAS JSON válido:
