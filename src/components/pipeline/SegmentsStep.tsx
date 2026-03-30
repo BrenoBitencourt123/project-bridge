@@ -26,28 +26,43 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
     if (!project.raw_script) return;
     setSegmenting(true);
     try {
-      // Parsing local — agrupa parágrafos até ~80-100 palavras por bloco
-      const rawParagraphs = project.raw_script
-        .split(/\n\n+/)
-        .map(p => p.trim())
-        .filter(p => p.length > 0);
+      // Detectar se o roteiro já tem marcadores de CENA
+      const sceneMarkerRegex = /^CENA\s+\d+/im;
+      const hasSceneMarkers = sceneMarkerRegex.test(project.raw_script);
 
-      const TARGET_WORDS = 90;
-      const paragraphs: string[] = [];
-      let buffer = '';
-      let bufferWords = 0;
-      for (const p of rawParagraphs) {
-        const pWords = p.split(/\s+/).length;
-        if (buffer && bufferWords + pWords > TARGET_WORDS * 1.2) {
-          paragraphs.push(buffer);
-          buffer = p;
-          bufferWords = pWords;
-        } else {
-          buffer = buffer ? `${buffer}\n\n${p}` : p;
-          bufferWords += pWords;
+      let paragraphs: string[];
+
+      if (hasSceneMarkers) {
+        // Dividir pelos marcadores de CENA, preservando a estrutura do usuário
+        const splitRegex = /^(?=CENA\s+\d+)/im;
+        paragraphs = project.raw_script
+          .split(splitRegex)
+          .map(block => block.trim())
+          .filter(block => block.length > 0);
+      } else {
+        // Fallback: agrupa parágrafos até ~90 palavras por bloco
+        const rawParagraphs = project.raw_script
+          .split(/\n\n+/)
+          .map(p => p.trim())
+          .filter(p => p.length > 0);
+
+        const TARGET_WORDS = 90;
+        paragraphs = [];
+        let buffer = '';
+        let bufferWords = 0;
+        for (const p of rawParagraphs) {
+          const pWords = p.split(/\s+/).length;
+          if (buffer && bufferWords + pWords > TARGET_WORDS * 1.2) {
+            paragraphs.push(buffer);
+            buffer = p;
+            bufferWords = pWords;
+          } else {
+            buffer = buffer ? `${buffer}\n\n${p}` : p;
+            bufferWords += pWords;
+          }
         }
+        if (buffer) paragraphs.push(buffer);
       }
-      if (buffer) paragraphs.push(buffer);
 
       // Deletar sub-cenas e segmentos existentes
       const existingSegmentIds = segments.map(s => s.id);
