@@ -321,7 +321,8 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
       {segments.length > 0 && !isProcessing && (
         <>
           <p className="text-sm text-muted-foreground">
-            {segments.length} blocos · {totalSubScenes} sub-cenas
+            {segments.length} blocos · {totalSubScenes} sub-cenas · ~{avgSecondsPerSub}s/sub-cena · ~{Math.round(estimatedDurationSec / 60)}min estimados
+          </p>
           </p>
           <div className="space-y-2">
             {segments.map((seg, i) => (
