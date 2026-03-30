@@ -243,7 +243,8 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
         .select();
       if (insertErr) throw insertErr;
 
-      const insertedSubScenes = await createSubScenesWithAI(inserted);
+      const adaptWordCount = newSegments.reduce((sum, s) => sum + s.narration.split(/\s+/).length, 0);
+      const insertedSubScenes = await createSubScenesWithAI(inserted, undefined, adaptWordCount);
       await finalize(inserted, insertedSubScenes);
     } catch (err: any) {
       toast({ title: 'Erro ao adaptar roteiro', description: err.message, variant: 'destructive' });
