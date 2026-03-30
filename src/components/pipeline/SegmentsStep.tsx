@@ -62,14 +62,14 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
   const { toast } = useToast();
 
   /** Shared logic: given inserted segments, call AI to split each into sub-scenes */
-  async function createSubScenesWithAI(inserted: any[], sceneLabels?: string[]) {
+  async function createSubScenesWithAI(inserted: any[], sceneLabels?: string[], totalWordCount?: number) {
     const allSubScenes: any[] = [];
     for (let idx = 0; idx < inserted.length; idx++) {
       const seg = inserted[idx];
       setProgressMsg(`Dividindo cena ${idx + 1}/${inserted.length} em sub-cenas...`);
       setProgressPct(Math.round(((idx) / inserted.length) * 100));
 
-      const subs = await splitWithAI(seg.narration, sceneLabels?.[idx]);
+      const subs = await splitWithAI(seg.narration, sceneLabels?.[idx], totalWordCount, inserted.length);
       for (let si = 0; si < subs.length; si++) {
         allSubScenes.push({
           segment_id: seg.id,
