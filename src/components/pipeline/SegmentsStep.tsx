@@ -190,7 +190,8 @@ export function SegmentsStep({ project, segments, onSegmentsChange, onUpdate, on
         .select();
       if (insertErr) throw insertErr;
 
-      const insertedSubScenes = await createSubScenesWithAI(inserted, sceneLabels);
+      const scriptWordCount = project.raw_script?.trim().split(/\s+/).length || 0;
+      const insertedSubScenes = await createSubScenesWithAI(inserted, sceneLabels, scriptWordCount);
       await finalize(inserted, insertedSubScenes);
     } catch (err: any) {
       toast({ title: 'Erro ao segmentar', description: err.message, variant: 'destructive' });
