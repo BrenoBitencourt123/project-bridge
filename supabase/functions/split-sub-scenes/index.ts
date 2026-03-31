@@ -101,31 +101,47 @@ Cada "passo mental" do aluno deve ser uma sub-cena.
 - Se um trecho tiver mais de 38 palavras, DIVIDA em duas sub-cenas
 
 ## REGRAS DO image_prompt (CRÍTICO — LEIA COM ATENÇÃO)
-Cada image_prompt deve ser um PARÁGRAFO DESCRITIVO de 2-4 frases em português.
-Ele será usado para gerar a imagem da sub-cena. Quanto mais detalhado, melhor.
 
-ESTRUTURA OBRIGATÓRIA do image_prompt:
-1. COMPOSIÇÃO: tipo de enquadramento (close-up, plano aberto, vista aérea, split-screen, over-the-shoulder)
-2. SUJEITO: quem/o quê aparece, com detalhes (idade, expressão, postura, roupa, cor)
-3. CENÁRIO: onde acontece (sala de aula, quadro-negro, tela de computador, mesa de estudos, cenário abstrato)
-4. ELEMENTOS VISUAIS: objetos, gráficos, números, fórmulas, setas, destaques, cores dominantes
-5. ATMOSFERA: iluminação, tom emocional, estilo visual (educativo moderno, minimalista, infográfico, cinematográfico)
+IDIOMA: Todos os image_prompt DEVEM ser escritos em PORTUGUÊS BRASILEIRO (PT-BR). NUNCA em inglês.
+
+FOCO: O image_prompt descreve APENAS o CONTEÚDO VISUAL da cena — O QUE aparece na imagem.
+NÃO inclua estilo artístico (sketch, flat design, cinematográfico, cartoon, etc.).
+NÃO inclua ângulo de câmera (close-up, vista frontal, plano aberto, over-the-shoulder, etc.).
+NÃO inclua iluminação ou atmosfera (suave, dramática, etc.).
+O sistema de geração de imagem já aplica estilo e enquadramento automaticamente.
+
+ESTRUTURA OBRIGATÓRIA (2-4 frases descritivas):
+1. SUJEITO PRINCIPAL: quem ou o que aparece (pessoa, objeto, metáfora visual)
+2. AÇÃO/ESTADO: o que está acontecendo na cena
+3. ELEMENTOS VISUAIS: objetos secundários, números, fórmulas, setas, textos visíveis (máx. 1-4 palavras), cores de destaque
+4. CONTEXTO ESPACIAL: onde acontece (mesa, quadro, tela dividida, cenário abstrato) — sem mencionar enquadramento
+
+REGRA ANTI-REPETIÇÃO (OBRIGATÓRIA):
+- Cada sub-cena de uma mesma cena DEVE ter uma composição visual COMPLETAMENTE DIFERENTE
+- NUNCA repita o mesmo prompt com variações de ângulo ou detalhes mínimos
+- Se duas sub-cenas mostrariam a mesma coisa, você errou na divisão — repense
+- Cada image_prompt deve mostrar OBJETOS DIFERENTES, CENÁRIOS DIFERENTES ou MOMENTOS DIFERENTES da explicação
 
 EXEMPLOS DE BOA QUALIDADE:
-- "Close-up de mão de estudante segurando uma urna transparente com 5 bolas coloridas (3 azuis, 2 vermelhas). Fundo desfocado de sala de aula. Iluminação suave lateral. Uma seta amarela aponta para as bolas azuis com o texto '3/5' flutuando ao lado."
-- "Split-screen vertical: lado esquerdo mostra cálculo errado riscado em vermelho com X grande; lado direito mostra cálculo correto em verde com checkmark. Fundo escuro estilo quadro-negro. Números grandes e legíveis."
-- "Plano médio de adolescente sentado em mesa de estudos, expressão de 'eureka' com lâmpada acesa sobre a cabeça. Caderno aberto com fórmula P = n(A)/n(S) destacada em amarelo. Estilo ilustração educativa flat design."
+- "Mão segurando urna transparente com 5 bolas (3 azuis, 2 vermelhas). Seta amarela aponta para as bolas azuis com '3/5' escrito ao lado. Mesa de madeira ao fundo."
+- "Tela dividida ao meio: lado esquerdo mostra cálculo '6/10' riscado em vermelho com X; lado direito mostra '3/5' em verde com checkmark. Números grandes e legíveis."
+- "Adolescente em mesa de estudos com expressão de eureka, lâmpada acesa sobre a cabeça. Caderno aberto com fórmula P = n(A)/n(S) destacada em amarelo."
+- "Gráfico de barras comparando 3 regiões do Brasil. Barra do Sudeste em destaque com valor '42%' acima. Seta vermelha indicando queda na barra do Norte."
+- "Balança de dois pratos: esquerda com pilha de moedas rotulada 'custo'; direita com diploma e troféu rotulados 'benefício'. Fiel da balança pendendo para a direita."
 
 EXEMPLOS RUINS (NÃO FAÇA ISSO):
-- "probabilidade" ← muito vago
-- "aluno estudando" ← genérico demais
-- "gráfico de probabilidade" ← sem detalhes visuais
+- "A student looking confused at a graph" ← em inglês, proibido
+- "probabilidade" ← muito vago, sem detalhes
+- "aluno estudando — vista frontal, foco no conceito" ← inclui ângulo de câmera
+- "Ilustração em estilo sketch de estudante" ← inclui estilo artístico
+- Mesmo prompt repetido 3x com "vista frontal / close-up / panorâmica" ← anti-repetição violada
 
-REGRAS:
-- Cada sub-cena DEVE ter um image_prompt único e diferente dos demais
-- O prompt deve ser autocontido — alguém que não leu o roteiro deve conseguir gerar a imagem
-- Inclua cores, posições, expressões, textos na tela quando relevante
-- Para conceitos abstratos, descreva uma METÁFORA VISUAL concreta
+REGRAS FINAIS:
+- O prompt deve ser autocontido — alguém que não leu o roteiro deve entender a cena
+- Inclua cores, posições, expressões faciais, textos visíveis quando relevante
+- Para conceitos abstratos, use METÁFORA VISUAL concreta (balança, engrenagens, ampulheta, etc.)
+- NUNCA inclua nomes de marca, canal, logotipos ou URLs
+- Textos visíveis na imagem: máximo 1-4 palavras (rótulos, valores, fórmulas curtas)
 
 ## FORMATO DE RESPOSTA
 Retorne APENAS JSON válido:
