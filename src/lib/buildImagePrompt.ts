@@ -1,21 +1,22 @@
 /**
- * Monta um prompt de geração de imagem no estilo art direction —
- * parágrafo coeso, não lista de regras — para uso manual no Gemini
- * ou via API (generate-image).
+ * Monta um prompt de geração de imagem com assinatura visual (semente de consistência).
+ * O bloco ESTILO MESTRE é sempre o primeiro elemento lido pelo modelo,
+ * garantindo que todas as imagens do vídeo mantenham a mesma linguagem visual.
  */
 
-const STYLE_DESCRIPTIONS: Record<string, string> = {
-  sketch: 'desenhada à mão em papel bege texturizado, estilo esboço com hachura a lápis e ligeira aspereza, usando tons de preto, branco e cinza, com apenas laranja como cor de destaque para ênfase',
-  impacto: 'no estilo cartoon/quadrinho com texturas de meio-tom (halftone) e sombreamento pop-art retrô, paleta quente e rica com âmbar, laranja, azul-teal e marrom, alto contraste dramático',
+const STYLE_SEEDS: Record<string, string> = {
+  sketch: `ESTILO MESTRE (aplique em todos os elementos): Ilustração desenhada à mão, estilo esboço educacional, papel bege/creme texturizado (#E8E0D0). Paleta restrita: preto, branco e cinza (#2C2C2C traços) com APENAS laranja (#E8610A) como cor de destaque — use o laranja somente para o elemento mais importante da cena. Técnica: hachura a lápis, ligeira aspereza, traços irregulares que parecem feitos à mão. Feel: caderno de estudante, anotação de aula, didático e acessível. NUNCA use cores fora desta paleta.`,
+
+  impacto: `ESTILO MESTRE (aplique em todos os elementos): Ilustração cartoon/quadrinho com texturas de meio-tom (halftone) e sombreamento pop-art retrô. Paleta quente e rica: âmbar (#F5A623), laranja (#E8610A), azul-teal (#1A9E9E), marrom (#7B4F2E), verde terroso (#5A7A3A). Técnica: contornos pretos espessos, halftone nas sombras, alto contraste dramático. Feel: quadrinho educacional, energia, impacto visual imediato. NUNCA use neon, NUNCA use pastel, NUNCA use realismo fotográfico.`,
+
+  padrao: `ESTILO MESTRE (aplique em todos os elementos): Ilustração desenhada à mão, estilo esboço educacional clean, papel bege/creme suave (#F5F0E8). Paleta: tons de cinza (#444444 traços) com APENAS azul (#4A90E2) como cor de destaque — use o azul somente para o elemento mais importante da cena. Técnica: hachura leve a lápis, linhas limpas, aspecto de material didático profissional. Feel: startup de educação, clean, moderno e confiável. NUNCA use cores fora desta paleta.`,
 };
 
-const DEFAULT_STYLE_DESC = 'desenhada à mão em papel bege texturizado, estilo esboço com hachura a lápis, usando tons de cinza com apenas azul (#4A90E2) como cor de destaque para ênfase';
-
 const CAMERA_INSTRUCTIONS: Record<string, string> = {
-  opening: 'O enquadramento usa PLANO MÉDIO, mostrando a pessoa ou elemento principal interagindo com o ambiente.',
-  middle:  'O enquadramento usa CLOSE-UP, com foco em um único objeto, número ou símbolo-chave que represente esse momento.',
-  closing: 'O enquadramento usa VISÃO AMPLA, com uma metáfora panorâmica ou visão de conjunto que sintetize o bloco.',
-  final:   'O enquadramento usa PERSPECTIVA CRIATIVA, com composição diferente de tudo que veio antes.',
+  opening: 'Enquadramento: PLANO MÉDIO — mostre a pessoa ou elemento principal interagindo com o ambiente.',
+  middle:  'Enquadramento: CLOSE-UP — foco em um único objeto, número ou símbolo-chave que represente esse momento.',
+  closing: 'Enquadramento: VISÃO AMPLA — metáfora panorâmica ou visão de conjunto que sintetize o bloco.',
+  final:   'Enquadramento: PERSPECTIVA CRIATIVA — composição diferente de tudo que veio antes.',
 };
 
 const POS_LABELS: Record<string, string> = {
@@ -28,19 +29,19 @@ const POS_LABELS: Record<string, string> = {
 function detectVisualHint(narration: string): string {
   const lower = narration.toLowerCase();
   if (/dias?|semanas?|meses?|anos?|prazo|tempo|calendário/.test(lower))
-    return 'Elementos de passagem do tempo (calendário, relógio ou linha do tempo) reforçam a ideia central.';
+    return 'Dica visual: elementos de passagem do tempo (calendário, relógio ou linha do tempo) como metáfora central.';
   if (/por cento|%|porcentagem|crescimento|número|dado|estatística/.test(lower))
-    return 'Um dado numérico (gráfico de barras, barra de progresso ou fatia de pizza) é o destaque visual.';
+    return 'Dica visual: dado numérico em destaque — gráfico de barras, barra de progresso ou fatia de pizza.';
   if (/erro|armadilha|ilusão|engano|perigo|cuidado|atenção/.test(lower))
-    return 'Uma lupa expondo uma verdade oculta ou uma armadilha sendo revelada reforça a mensagem.';
+    return 'Dica visual: lupa expondo verdade oculta ou armadilha sendo revelada.';
   if (/soma|total|acumulado|pilha|montanha|resultado|efeito/.test(lower))
-    return 'Elementos pequenos se acumulando em montanha ou efeito bola de neve reforçam a ideia.';
+    return 'Dica visual: elementos pequenos se acumulando — efeito bola de neve ou montanha crescente.';
   if (/transformação|evolução|mudança|antes|depois|virada/.test(lower))
-    return 'Um contraste antes/depois ou linha divisória de transformação reforça a mensagem visual.';
+    return 'Dica visual: contraste antes/depois ou linha divisória de transformação.';
   if (/comparação|diferença|versus|vs\.?|melhor|pior|escolha/.test(lower))
-    return 'Dois caminhos, opções ou resultados lado a lado criam a comparação visual.';
+    return 'Dica visual: dois caminhos, opções ou resultados lado a lado.';
   if (/pessoa|alguém|ela|ele|trabalhador|profissional|estudante/.test(lower))
-    return 'Um personagem expressivo representando a situação narrada ocupa posição de destaque.';
+    return 'Dica visual: personagem expressivo representando a situação narrada em posição de destaque.';
   return '';
 }
 
@@ -66,7 +67,8 @@ export function buildImagePrompt({
   subIndex,
   totalSubScenes,
 }: BuildImagePromptParams): string {
-  const styleDesc = STYLE_DESCRIPTIONS[styleName] ?? DEFAULT_STYLE_DESC;
+  const styleKey = styleName && STYLE_SEEDS[styleName] ? styleName : 'padrao';
+  const styleSeed = STYLE_SEEDS[styleKey];
 
   const subPosition = (subIndex != null && totalSubScenes != null)
     ? deriveSubPosition(subIndex, totalSubScenes)
@@ -79,19 +81,20 @@ export function buildImagePrompt({
     ? `[${POS_LABELS[subPosition] ?? subPosition.toUpperCase()} — sub-cena ${subIndex} de ${totalSubScenes}] `
     : '';
 
-  // Monta parágrafo coeso de art direction
-  const parts: string[] = [
-    `Uma ilustração educacional ${styleDesc}.`,
-    `${posLabel}${imagePrompt}.`,
+  const lines = [
+    styleSeed,
+    '',
+    `CENA: ${posLabel}${imagePrompt}`,
     cameraInstruction,
-    visualHint ? `${visualHint}` : '',
-    'O elemento principal está centralizado e ocupa 60-70% do frame, com contexto de suporte nas bordas.',
-    'Todo texto visível na imagem deve estar em Português Brasileiro (PT-BR), com no máximo 1-4 palavras visíveis (títulos, rótulos ou valores numéricos — nunca frases completas da narração).',
-    'O fundo mantém a textura do papel com leves linhas de esboço de contexto, sem logotipos ou marcas.',
-    'Proporção exata 16:9 (1920x1080 widescreen).',
+    visualHint,
+    '',
+    'COMPOSIÇÃO: Elemento principal centralizado, ocupando 60-70% do frame. Contexto de suporte nas bordas.',
+    'TEXTO: Máximo 1-4 palavras visíveis em Português Brasileiro (PT-BR) — títulos ou rótulos curtos. Nunca transcrever frases completas da narração.',
+    'FUNDO: Textura do papel do estilo mestre, leves linhas de esboço de contexto. Sem logotipos ou marcas.',
+    'PROPORÇÃO: 16:9 exato (1920x1080 widescreen).',
   ];
 
-  return parts.filter(p => p.trim().length > 0).join(' ');
+  return lines.filter(l => l !== undefined && !(l === '' && lines[lines.indexOf(l) - 1] === '')).join('\n');
 }
 
 export const STYLE_OPTIONS = [
