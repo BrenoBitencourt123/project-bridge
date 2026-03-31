@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Download, Volume2, Loader2, Copy, Check } from 'lucide-react';
+import { Download, Volume2, Loader2, Copy, Check, ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Segment } from '@/types/atlas';
 import JSZip from 'jszip';
+import { buildImagePrompt, STYLE_OPTIONS } from '@/lib/buildImagePrompt';
 
 interface ExportStepProps {
   projectTitle: string;
@@ -26,6 +28,9 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [copied, setCopied] = useState(false);
+  const [geminiStyle, setGeminiStyle] = useState('padrao');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const audiosReady = allSubScenes.filter(sc => sc.audio_status === 'done').length;
@@ -35,6 +40,39 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
     await navigator.clipboard.writeText(promptsText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Sub-cenas com prompt completo para Gemini
+  const geminiSubScenes = segments.flatMap(seg =>
+    (seg.sub_scenes || [])
+      .sort((a, b) => a.sub_index - b.sub_index)
+      .map(sc => {
+        const total = seg.sub_scenes?.length ?? 1;
+        const prompt = buildImagePrompt({
+          imagePrompt: sc.image_prompt || seg.image_prompt || sc.narration_segment,
+          narration: sc.narration_segment,
+          styleName: geminiStyle === 'padrao' ? '' : geminiStyle,
+          subIndex: sc.sub_index,
+          totalSubScenes: total,
+        });
+        const id = `${seg.id}-${sc.sub_index}`;
+        return { id, segNum: seg.sequence_number, subIndex: sc.sub_index, narration: sc.narration_segment, prompt };
+      })
+  );
+
+  const handleCopySingle = async (id: string, prompt: string) => {
+    await navigator.clipboard.writeText(prompt);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleCopyAll = async () => {
+    const all = geminiSubScenes
+      .map((sc, i) => `=== IMAGEM ${i + 1} (${String(sc.segNum).padStart(2,'0')}.${sc.subIndex}) ===\n${sc.prompt}`)
+      .join('\n\n');
+    await navigator.clipboard.writeText(all);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
   };
 
   const handleDownload = async () => {
@@ -135,6 +173,51 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
             </div>
           );
         })}
+      </div>
+
+      {/* Prompts para Gemini */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ImageIcon className="h-4 w-4" />
+            <h4 className="text-sm font-medium">Prompts para Gemini</h4>
+            <span className="text-xs text-muted-foreground">({geminiSubScenes.length} imagens)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Select value={geminiStyle} onValueChange={setGeminiStyle}>
+              <SelectTrigger className="h-7 text-xs w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STYLE_OPTIONS.map(o => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={handleCopyAll}>
+              {copiedAll ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              {copiedAll ? 'Copiado!' : 'Copiar todos'}
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+          {geminiSubScenes.map((sc, i) => (
+            <div key={sc.id} className="border rounded-md p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono text-muted-foreground">
+                  Imagem {i + 1} · cena {String(sc.segNum).padStart(2,'0')}.{sc.subIndex}
+                </span>
+                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => handleCopySingle(sc.id, sc.prompt)}>
+                  {copiedId === sc.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  {copiedId === sc.id ? 'Copiado!' : 'Copiar'}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground truncate">{sc.narration.slice(0, 80)}</p>
+              <Textarea readOnly value={sc.prompt} className="text-xs font-mono leading-relaxed min-h-[80px] resize-none" />
+            </div>
+          ))}
+        </div>
       </div>
 
       <Button className="w-full" size="lg" onClick={handleDownload} disabled={downloading || audiosReady === 0}>
