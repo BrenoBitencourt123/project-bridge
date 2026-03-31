@@ -230,10 +230,14 @@ Retorne APENAS JSON válido:
 }
 
 ## REGRAS DO CAMPO visual
-- Em português, concreto e visual
-- Descreva EXATAMENTE o que apareceria na tela como orientação para storyboard
-- Seja específico: "aluno olhando para prova do ENEM com expressão confusa" > "aluno estudando"
-- Máximo 3 frases curtas
+Escreva uma descrição rica e detalhada como um brief de art direction para um ilustrador. Deve incluir:
+1. **Elemento principal** — o quê está centralizado na imagem e como está posicionado (ex: "uma grande balança de dois pratos desequilibrados, o prato esquerdo pesando mais com o rótulo 'ENEM' em destaque")
+2. **Elementos secundários** — o que mais aparece na cena (setas, ícones, expressões, gráficos, fórmulas, textos na tela)
+3. **Ação ou estado** — o que está acontecendo na cena (ex: "setas curvas apontam para baixo no prato pesado, indicando gravidade")
+4. **Cor de destaque** — qual cor é usada como ênfase e em quê (ex: "o rótulo 'ENEM' está realçado em azul")
+5. **Fundo** — textura do papel com contexto mínimo, sem marcas ou logos
+
+Em português. Sem markdown. Entre 3 e 6 frases. Seja específico o suficiente para que um ilustrador recrie a cena sem ver o vídeo.
 
 ## REGRAS GERAIS
 - Calcule timestamps sequenciais usando 1 palavra ≈ 0.4 segundos
