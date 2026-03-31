@@ -65,19 +65,29 @@ serve(async (req) => {
       }
     }
 
-    const prompt = `Você é um diretor de arte para vídeos educacionais ilustrados no estilo sketch (esboço a lápis em papel bege com destaque em azul).
+    const prompt = `Você é um diretor de arte para vídeos educacionais ilustrados.
 
 Para CADA sub-cena abaixo, gere um prompt de imagem (imagePrompt) ÚNICO e ESPECÍFICO para o conteúdo da narração.
 
 REGRAS OBRIGATÓRIAS:
-- imagePrompt DEVE ser em português brasileiro (PT-BR)
+- imagePrompt DEVE ser em português brasileiro (PT-BR). NUNCA em inglês.
+- NÃO inclua estilo artístico (sketch, flat design, cartoon, etc.) — o sistema aplica estilo automaticamente
+- NÃO inclua ângulo de câmera (close-up, vista frontal, plano aberto, etc.) — o sistema aplica enquadramento automaticamente
+- Foque 100% no CONTEÚDO VISUAL: O QUE aparece na imagem (objetos, pessoas, ações, dados, metáforas)
 - Descreva uma cena LITERAL e CONCRETA que ilustre ESPECIFICAMENTE o que a narração diz
-- CADA sub-cena deve ter uma composição visual DIFERENTE — não repita elementos centrais
-- Se a narração fala de um conceito abstrato, use uma METÁFORA VISUAL concreta
+- CADA sub-cena deve ter uma composição visual COMPLETAMENTE DIFERENTE — NUNCA repita elementos centrais
+- NUNCA use o mesmo prompt com variações mínimas (ângulo, detalhe) — cada imagem deve mostrar OBJETOS ou MOMENTOS DIFERENTES
+- Se a narração fala de um conceito abstrato, use uma METÁFORA VISUAL concreta (balança, engrenagem, ampulheta, etc.)
 - Se houver fórmulas/números, inclua-os no prompt
 - Textos visíveis na imagem: máximo 1-4 palavras (rótulos, valores)
 - NUNCA inclua nomes de marca, canal ou logos
 - symbolism: breve explicação do que a imagem representa
+
+ESTRUTURA DO imagePrompt (2-4 frases):
+1. SUJEITO PRINCIPAL: quem ou o que aparece
+2. AÇÃO/ESTADO: o que está acontecendo
+3. ELEMENTOS VISUAIS: objetos secundários, números, setas, textos visíveis, cores de destaque
+4. CONTEXTO ESPACIAL: onde acontece (sem mencionar enquadramento ou estilo)
 
 SUB-CENAS:
 ${subSceneList.join('\n')}
