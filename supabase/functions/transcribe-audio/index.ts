@@ -16,7 +16,7 @@ serve(async (req) => {
     const audioFile = formData.get("audio");
     if (!audioFile || !(audioFile instanceof File)) throw new Error("Audio file required");
 
-    // Send to Whisper
+    // Send to Whisper with word-level timestamps
     const whisperForm = new FormData();
     whisperForm.append("file", audioFile);
     whisperForm.append("model", "whisper-1");
@@ -36,41 +36,14 @@ serve(async (req) => {
     }
 
     const whisperData = await whisperResp.json();
-    const words = whisperData.words || [];
-
-    // Convert word-level timestamps to character-level
-    const characters: string[] = [];
-    const charStartTimes: number[] = [];
-    const charEndTimes: number[] = [];
-
-    for (let w = 0; w < words.length; w++) {
-      const word = words[w];
-      const text = word.word || "";
-      const start = word.start || 0;
-      const end = word.end || 0;
-      const charDuration = text.length > 0 ? (end - start) / text.length : 0;
-
-      for (let c = 0; c < text.length; c++) {
-        characters.push(text[c]);
-        charStartTimes.push(start + c * charDuration);
-        charEndTimes.push(start + (c + 1) * charDuration);
-      }
-
-      // Add space between words (except last)
-      if (w < words.length - 1) {
-        const nextStart = words[w + 1].start || end;
-        characters.push(" ");
-        charStartTimes.push(end);
-        charEndTimes.push(nextStart);
-      }
-    }
+    const words: { word: string; start: number; end: number }[] = whisperData.words || [];
+    const fullText: string = whisperData.text || words.map((w) => w.word).join(" ");
+    const totalDuration: number = words.length > 0 ? words[words.length - 1].end : 0;
 
     return new Response(JSON.stringify({
-      alignment: {
-        characters,
-        character_start_times_seconds: charStartTimes,
-        character_end_times_seconds: charEndTimes,
-      },
+      wordTimestamps: words.map((w) => ({ word: w.word, start: w.start, end: w.end })),
+      fullText,
+      totalDuration,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

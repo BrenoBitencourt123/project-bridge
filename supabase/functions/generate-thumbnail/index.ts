@@ -45,6 +45,7 @@ Topic: "${projectTitle}". ${userPrompt || ""}`;
       body: JSON.stringify({
         model: "gemini-3-pro-image-preview",
         messages: [{ role: "user", content: prompt }],
+        modalities: ["image", "text"],
       }),
     });
 

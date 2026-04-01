@@ -12,35 +12,15 @@ interface ExportStepProps {
   segments: Segment[];
 }
 
-function buildPromptsText(segments: Segment[]): string {
-  return segments.map(seg => {
-    const num = String(seg.sequence_number).padStart(2, '0');
-    const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
-    const header = `CENA ${num}: ${seg.narration.slice(0, 60)}`;
-    const subs = subScenes.map(sc =>
-      `  SUBCENA ${num}.${sc.sub_index}: ${sc.image_prompt || '(sem prompt)'}`
-    ).join('\n');
-    return `${header}\n${subs}`;
-  }).join('\n\n');
-}
-
 export function ExportStep({ projectTitle, segments }: ExportStepProps) {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [copied, setCopied] = useState(false);
   const [geminiStyle, setGeminiStyle] = useState('padrao');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const audiosReady = allSubScenes.filter(sc => sc.audio_status === 'done').length;
-  const promptsText = buildPromptsText(segments);
-
-  const handleCopyPrompts = async () => {
-    await navigator.clipboard.writeText(promptsText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   // Sub-cenas com prompt completo para Gemini
   const geminiSubScenes = segments.flatMap(seg =>
@@ -90,8 +70,11 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
     try {
       const zip = new JSZip();
 
-      // Add prompts text file
-      zip.file('prompts.txt', promptsText);
+      // Add prompts text file (prompts Gemini enriquecidos)
+      const geminiPromptsText = geminiSubScenes
+        .map((sc, i) => `=== IMAGEM ${i + 1} (${String(sc.segNum).padStart(2,'0')}.${sc.subIndex}) ===\n${sc.prompt}`)
+        .join('\n\n');
+      zip.file('prompts.txt', geminiPromptsText);
 
       let completed = 0;
       const CONCURRENCY = 6;
@@ -133,22 +116,6 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
         <p className="text-muted-foreground">
           {audiosReady} áudios · {allSubScenes.length} prompts de imagem
         </p>
-      </div>
-
-      {/* Prompts section */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h4 className="text-sm font-medium">Prompts de Imagem</h4>
-          <Button variant="outline" size="sm" onClick={handleCopyPrompts}>
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            {copied ? 'Copiado!' : 'Copiar Prompts'}
-          </Button>
-        </div>
-        <Textarea
-          readOnly
-          value={promptsText}
-          className="min-h-[200px] font-mono text-xs leading-relaxed"
-        />
       </div>
 
       {/* Audio list */}

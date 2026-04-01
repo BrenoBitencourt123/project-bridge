@@ -1,15 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Volume2, RefreshCw, Upload, ArrowRight, Loader2, Copy, Check } from 'lucide-react';
+import { Volume2, RefreshCw, Upload, ArrowRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { Project, Segment, SubScene } from '@/types/atlas';
 import { useToast } from '@/hooks/use-toast';
-import { splitAudioAtCutPoints, splitChunkedAudioAtCutPoints } from '@/lib/audio-splitter';
-import { findSubSceneCutPoints } from '@/lib/find-cut-points';
+import { splitAudioAtCutPoints } from '@/lib/audio-splitter';
 import { AudioImportDialog } from './AudioImportDialog';
-import { Textarea } from '@/components/ui/textarea';
-import type { Alignment } from '@/types/atlas';
 
 interface MediaStepProps {
   project: Project;
@@ -20,16 +17,22 @@ interface MediaStepProps {
   onGeneratingChange?: (generating: boolean) => void;
 }
 
-function buildPromptsText(segments: Segment[]): string {
-  return segments.map(seg => {
-    const num = String(seg.sequence_number).padStart(2, '0');
-    const subScenes = (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index);
-    const header = `CENA ${num}: ${seg.narration.slice(0, 60)}`;
-    const subs = subScenes.map(sc =>
-      `  SUBCENA ${num}.${sc.sub_index}: ${sc.image_prompt || '(sem prompt)'}`
-    ).join('\n');
-    return `${header}\n${subs}`;
-  }).join('\n\n');
+interface WordTimestamp {
+  word: string;
+  start: number;
+  end: number;
+}
+
+interface AudioSubScene {
+  narration_segment: string;
+  image_prompt: string;
+  start_time: number;
+  end_time: number;
+}
+
+interface SegmentedAudio {
+  segment_id: string;
+  sub_scenes: AudioSubScene[];
 }
 
 export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange }: MediaStepProps) {
@@ -40,16 +43,12 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [audioProgress, setAudioProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
-  const [copied, setCopied] = useState(false);
 
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subAudiosDone = allSubScenes.filter(sc => sc.audio_status === 'done').length;
   const totalSubScenes = allSubScenes.length;
   const allAudiosDone = subAudiosDone === totalSubScenes && totalSubScenes > 0;
-
   const isAnyGenerating = generatingAudios || regenerating || uploadingAudio;
-
-  const promptsText = buildPromptsText(segments);
 
   useEffect(() => {
     const segmentIds = segments.map(s => s.id);
@@ -130,28 +129,71 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
     }
   };
 
-  const flattenSubScenes = (): { subScene: SubScene; segment: Segment; flatIndex: number }[] => {
-    const flat: { subScene: SubScene; segment: Segment; flatIndex: number }[] = [];
-    let idx = 0;
-    for (const seg of segments) {
-      for (const sc of (seg.sub_scenes || []).sort((a, b) => a.sub_index - b.sub_index)) {
-        flat.push({ subScene: sc, segment: seg, flatIndex: idx++ });
+  // Replace existing sub_scenes in DB with AI-segmented ones, then cut and upload audio
+  const applyAudioSegmentation = async (
+    segmentedSubScenes: SegmentedAudio[],
+    audioBuffer: ArrayBuffer,
+    totalDuration: number,
+  ) => {
+    // Delete existing sub_scenes
+    setStatusText('Recriando sub-cenas pela IA...');
+    const allSegmentIds = segments.map(s => s.id);
+    await supabase.from('sub_scenes').delete().in('segment_id', allSegmentIds);
+
+    // Insert new sub_scenes and track them with their timing info
+    type SubSceneWithTiming = SubScene & { _start: number; _end: number };
+    const insertedSubScenes: SubSceneWithTiming[] = [];
+
+    for (const segGroup of segmentedSubScenes) {
+      for (let i = 0; i < segGroup.sub_scenes.length; i++) {
+        const sc = segGroup.sub_scenes[i];
+        const { data: inserted, error: insertErr } = await supabase
+          .from('sub_scenes')
+          .insert({
+            segment_id: segGroup.segment_id,
+            sub_index: i + 1,
+            narration_segment: sc.narration_segment,
+            image_prompt: sc.image_prompt,
+            audio_status: 'idle',
+            image_status: 'idle',
+          })
+          .select()
+          .single();
+        if (insertErr) throw insertErr;
+        insertedSubScenes.push({ ...(inserted as SubScene), _start: sc.start_time, _end: sc.end_time });
       }
     }
-    return flat;
-  };
 
-  const uploadSubSceneAudios = async (blobs: Blob[], flatSubs: { subScene: SubScene; segment: Segment }[]) => {
-    for (let i = 0; i < blobs.length && i < flatSubs.length; i++) {
-      const { subScene: sc, segment: seg } = flatSubs[i];
+    // Update local state
+    onSegmentsChange(segments.map(seg => ({
+      ...seg,
+      sub_scenes: insertedSubScenes
+        .filter(sc => sc.segment_id === seg.id)
+        .map(({ _start: _, _end: __, ...sc }) => sc as SubScene),
+    })));
+
+    // Cut audio at start_times (except first sub-scene which starts at 0)
+    setStatusText('Fatiando áudio por sub-cena...');
+    const cutTimes = insertedSubScenes.slice(1).map(sc => sc._start);
+    const blobs = await splitAudioAtCutPoints(audioBuffer, cutTimes);
+
+    // Upload each blob
+    setStatusText('Enviando áudios das sub-cenas...');
+    for (let i = 0; i < blobs.length && i < insertedSubScenes.length; i++) {
+      const sc = insertedSubScenes[i];
+      const seg = segments.find(s => s.id === sc.segment_id);
+      if (!seg) continue;
       const num = String(seg.sequence_number).padStart(3, '0');
       const fileName = `${project.id}/segment-${num}-sub-${sc.sub_index}.wav`;
-      const { error: uploadErr } = await supabase.storage.from('segment-audio').upload(fileName, blobs[i], { upsert: true, contentType: 'audio/wav' });
+      const { error: uploadErr } = await supabase.storage
+        .from('segment-audio')
+        .upload(fileName, blobs[i], { upsert: true, contentType: 'audio/wav' });
       if (uploadErr) { console.error(uploadErr); continue; }
       const { data: urlData } = supabase.storage.from('segment-audio').getPublicUrl(fileName);
-      updateSubSceneInSegments(seg.id, sc.id, { audio_url: urlData.publicUrl, audio_status: 'done' });
-      await supabase.from('sub_scenes').update({ audio_url: urlData.publicUrl, audio_status: 'done' }).eq('id', sc.id);
-      setAudioProgress(((i + 1) / flatSubs.length) * 100);
+      const audioUrl = urlData.publicUrl + `?t=${Date.now()}`;
+      await supabase.from('sub_scenes').update({ audio_url: audioUrl, audio_status: 'done' }).eq('id', sc.id);
+      updateSubSceneInSegments(sc.segment_id, sc.id, { audio_url: audioUrl, audio_status: 'done' });
+      setAudioProgress(((i + 1) / insertedSubScenes.length) * 100);
     }
   };
 
@@ -165,25 +207,44 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         body: { rawScript: project.raw_script, projectId: project.id },
       });
       if (error) throw error;
-      setStatusText('Processando alinhamento...');
-      const alignment: Alignment = data.isChunked
-        ? mergeAlignments(data.chunks.map((c: any) => c.alignment))
+
+      // Convert ElevenLabs character-level alignment to word timestamps
+      setStatusText('Segmentando áudio com IA...');
+      const alignment = data.isChunked
+        ? mergeCharAlignments(data.chunks.map((c: any) => c.alignment))
         : data.alignment;
-      const cutTimes = findSubSceneCutPoints(project.raw_script!, alignment, segments);
-      setStatusText('Fatiando áudio por sub-cena...');
-      let blobs: Blob[];
+      const wordTimestamps = charAlignmentToWordTimestamps(alignment);
+      const totalDuration = alignment.character_end_times_seconds[alignment.character_end_times_seconds.length - 1] || 0;
+
+      const { data: segData, error: segError } = await supabase.functions.invoke('segment-audio', {
+        body: {
+          wordTimestamps,
+          fullText: wordTimestamps.map((w: WordTimestamp) => w.word).join(' '),
+          totalDuration,
+          segments: segments.map(s => ({ id: s.id, sequence_number: s.sequence_number, narration: s.narration, moment_type: s.moment_type })),
+        },
+      });
+      if (segError) throw segError;
+
+      // Decode full audio
+      let audioBytes: Uint8Array;
       if (data.isChunked) {
-        blobs = await splitChunkedAudioAtCutPoints(data.chunks.map((c: any) => c.audioBase64), cutTimes);
+        const arrays: Uint8Array[] = data.chunks.map((c: any) =>
+          Uint8Array.from(atob(c.audioBase64), (ch: string) => ch.charCodeAt(0))
+        );
+        const total = arrays.reduce((s, a) => s + a.length, 0);
+        audioBytes = new Uint8Array(total);
+        let off = 0;
+        for (const arr of arrays) { audioBytes.set(arr, off); off += arr.length; }
       } else {
-        const audioBytes = Uint8Array.from(atob(data.fullAudioBase64), c => c.charCodeAt(0));
-        blobs = await splitAudioAtCutPoints(audioBytes.buffer, cutTimes);
+        audioBytes = Uint8Array.from(atob(data.fullAudioBase64), c => c.charCodeAt(0));
       }
-      setStatusText('Enviando áudios das sub-cenas...');
-      const flatSubs = flattenSubScenes();
-      await uploadSubSceneAudios(blobs, flatSubs);
+
+      await applyAudioSegmentation(segData.segmentedSubScenes, audioBytes.buffer, totalDuration);
+
       await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
       onUpdate({ status: 'audio_done' });
-      toast({ title: 'Áudios gerados!' });
+      toast({ title: 'Áudios gerados e sub-cenas criadas pela IA!' });
     } catch (err: any) {
       toast({ title: 'Erro ao gerar áudios', description: err.message, variant: 'destructive' });
     } finally {
@@ -196,47 +257,65 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const handleUploadAudio = async (orderedFiles: File[]) => {
     if (orderedFiles.length === 0) return;
     setUploadingAudio(true);
-    setStatusText('Transcrevendo áudio...');
+    setAudioProgress(0);
     try {
-      const alignments: Alignment[] = [];
+      // Step 1: Transcribe all files, collecting word timestamps with time offset
+      const allWordTimestamps: WordTimestamp[] = [];
       const audioBuffers: ArrayBuffer[] = [];
+      let totalDuration = 0;
+
       for (let i = 0; i < orderedFiles.length; i++) {
         setStatusText(`Transcrevendo parte ${i + 1} de ${orderedFiles.length}...`);
         const formData = new FormData();
         formData.append('audio', orderedFiles[i]);
         const { data, error } = await supabase.functions.invoke('transcribe-audio', { body: formData });
         if (error) throw error;
-        alignments.push(data.alignment);
+
+        const offsetWords = (data.wordTimestamps as WordTimestamp[]).map(w => ({
+          word: w.word,
+          start: w.start + totalDuration,
+          end: w.end + totalDuration,
+        }));
+        allWordTimestamps.push(...offsetWords);
+        totalDuration += data.totalDuration as number;
         audioBuffers.push(await orderedFiles[i].arrayBuffer());
       }
-      setStatusText('Processando alinhamento...');
-      const mergedAlignment = mergeAlignments(alignments);
-      const cutTimes = findSubSceneCutPoints(project.raw_script!, mergedAlignment, segments);
-      setStatusText('Fatiando áudio por sub-cena...');
+
+      // Step 2: AI segmentation
+      setStatusText('Segmentando áudio com IA...');
+      const { data: segData, error: segError } = await supabase.functions.invoke('segment-audio', {
+        body: {
+          wordTimestamps: allWordTimestamps,
+          fullText: allWordTimestamps.map(w => w.word).join(' '),
+          totalDuration,
+          segments: segments.map(s => ({
+            id: s.id,
+            sequence_number: s.sequence_number,
+            narration: s.narration,
+            moment_type: s.moment_type,
+          })),
+        },
+      });
+      if (segError) throw segError;
+
+      // Step 3: Merge audio buffers into one
       const totalLength = audioBuffers.reduce((sum, b) => sum + b.byteLength, 0);
       const merged = new Uint8Array(totalLength);
       let offset = 0;
       for (const buf of audioBuffers) { merged.set(new Uint8Array(buf), offset); offset += buf.byteLength; }
-      const blobs = await splitAudioAtCutPoints(merged.buffer, cutTimes);
-      setStatusText('Enviando áudios das sub-cenas...');
-      const flatSubs = flattenSubScenes();
-      await uploadSubSceneAudios(blobs, flatSubs);
+
+      // Step 4: Apply segmentation (delete old sub-scenes, create new, cut & upload audio)
+      await applyAudioSegmentation(segData.segmentedSubScenes, merged.buffer, totalDuration);
+
       await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
       onUpdate({ status: 'audio_done' });
-      toast({ title: 'Áudios importados!' });
+      toast({ title: 'Áudio importado e sub-cenas criadas pela IA!' });
     } catch (err: any) {
       toast({ title: 'Erro ao importar áudio', description: err.message, variant: 'destructive' });
     } finally {
       setUploadingAudio(false);
       setStatusText('');
     }
-  };
-
-  const handleCopyPrompts = async () => {
-    await navigator.clipboard.writeText(promptsText);
-    setCopied(true);
-    toast({ title: 'Prompts copiados!' });
-    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -247,7 +326,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           <div>
             <h3 className="font-semibold text-sm">Mídia & Prompts</h3>
             <p className="text-xs text-muted-foreground">
-              🔊 {subAudiosDone}/{totalSubScenes} áudios · 🖼 {totalSubScenes} prompts de imagem
+              🔊 {subAudiosDone}/{totalSubScenes} áudios · 🖼 {totalSubScenes} sub-cenas
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -266,7 +345,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
           </div>
         </div>
 
-        {generatingAudios && <Progress value={audioProgress} className="h-2" />}
+        {(generatingAudios || uploadingAudio) && <Progress value={audioProgress} className="h-2" />}
         {statusText && <p className="text-xs text-muted-foreground animate-pulse">{statusText}</p>}
 
         {allAudiosDone && (
@@ -274,22 +353,6 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
             Export <ArrowRight className="h-4 w-4" />
           </Button>
         )}
-      </div>
-
-      {/* Prompts textarea */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h4 className="text-sm font-medium">Prompts de Imagem</h4>
-          <Button variant="outline" size="sm" onClick={handleCopyPrompts}>
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            {copied ? 'Copiado!' : 'Copiar Prompts'}
-          </Button>
-        </div>
-        <Textarea
-          readOnly
-          value={promptsText}
-          className="min-h-[300px] font-mono text-xs leading-relaxed"
-        />
       </div>
 
       {/* Audio list per segment */}
@@ -330,8 +393,43 @@ function StatusDot({ status }: { status: string }) {
   return <div className={`h-2 w-2 rounded-full ${colors[status] || colors.idle}`} />;
 }
 
-function mergeAlignments(alignments: Alignment[]): Alignment {
-  const merged: Alignment = { characters: [], character_start_times_seconds: [], character_end_times_seconds: [] };
+// Convert ElevenLabs character-level alignment to word timestamps
+function charAlignmentToWordTimestamps(alignment: {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+}): WordTimestamp[] {
+  const words: WordTimestamp[] = [];
+  let wordChars: string[] = [];
+  let wordStart = 0;
+  let wordEnd = 0;
+
+  for (let i = 0; i < alignment.characters.length; i++) {
+    const ch = alignment.characters[i];
+    if (ch === ' ' || ch === '\n') {
+      if (wordChars.length > 0) {
+        words.push({ word: wordChars.join(''), start: wordStart, end: wordEnd });
+        wordChars = [];
+      }
+    } else {
+      if (wordChars.length === 0) wordStart = alignment.character_start_times_seconds[i];
+      wordChars.push(ch);
+      wordEnd = alignment.character_end_times_seconds[i];
+    }
+  }
+  if (wordChars.length > 0) {
+    words.push({ word: wordChars.join(''), start: wordStart, end: wordEnd });
+  }
+  return words;
+}
+
+// Merge ElevenLabs character-level alignments across chunks
+function mergeCharAlignments(alignments: {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+}[]): typeof alignments[0] {
+  const merged = { characters: [] as string[], character_start_times_seconds: [] as number[], character_end_times_seconds: [] as number[] };
   let timeOffset = 0;
   for (const a of alignments) {
     for (let i = 0; i < a.characters.length; i++) {
@@ -345,3 +443,4 @@ function mergeAlignments(alignments: Alignment[]): Alignment {
   }
   return merged;
 }
+
