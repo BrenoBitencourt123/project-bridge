@@ -149,9 +149,9 @@ export function AudioUploadStep({ project, onUpdate, onSegmentsChange, onNext }:
           if (!upErr) {
             const { data: urlData } = supabase.storage.from('segment-audio').getPublicUrl(fileName);
             audioUrl = urlData.publicUrl + `?t=${Date.now()}`;
-            await supabase.from('sub_scenes').update({ audio_url: audioUrl, audio_status: 'done' }).eq('id', sc.id);
+            await supabase.from('sub_scenes').update({ audio_url: audioUrl, audio_status: 'done' }).eq('id', sc.id as string);
           } else {
-            console.warn(`Upload falhou para sub_scene ${sc.id as string}:`, upErr);
+            console.warn(`Upload falhou para sub_scene ${String(sc.id)}:`, upErr);
           }
 
           subScenesUpdated.push({
