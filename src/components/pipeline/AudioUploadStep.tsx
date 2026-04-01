@@ -14,11 +14,10 @@ interface AudioUploadStepProps {
   onNext: () => void;
 }
 
-type StageKey = 'idle' | 'transcribing' | 'analyzing' | 'cutting' | 'uploading' | 'done';
+type StageKey = 'idle' | 'analyzing' | 'cutting' | 'uploading' | 'done';
 
 const STAGE_LABELS: Record<StageKey, string> = {
   idle: '',
-  transcribing: 'Transcrevendo áudio...',
   analyzing: 'Analisando conteúdo com IA...',
   cutting: 'Cortando sub-cenas...',
   uploading: 'Enviando áudios...',
@@ -44,73 +43,41 @@ export function AudioUploadStep({ project, onUpdate, onSegmentsChange, onNext }:
 
   const processAudio = useCallback(async (files: File[]) => {
     if (!files.length) return;
-    setStage('transcribing');
+    setStage('analyzing');
     setProgress(10);
 
     try {
-      // ── Step 1: Transcribe each file, collecting word timestamps with time offsets ──
-      interface WordTimestamp { word: string; start: number; end: number; }
-      const allWords: WordTimestamp[] = [];
-      let timeOffset = 0;
-      let fullText = '';
+      // ── Step 1: Merge audio files into one ArrayBuffer ──
       const audioBuffers: ArrayBuffer[] = [];
-
       for (const file of files) {
-        const formData = new FormData();
-        formData.append('audio', file);
-        const { data: txData, error: txErr } = await supabase.functions.invoke('transcribe-audio', { body: formData });
-        if (txErr) throw new Error(`Transcrição falhou: ${txErr.message}`);
-
-        const words: WordTimestamp[] = (txData.wordTimestamps || []).map((w: WordTimestamp) => ({
-          word: w.word,
-          start: w.start + timeOffset,
-          end: w.end + timeOffset,
-        }));
-
-        allWords.push(...words);
-        fullText += (fullText ? ' ' : '') + (txData.fullText || '');
-        timeOffset += txData.totalDuration || 0;
-
-        const buf = await file.arrayBuffer();
-        audioBuffers.push(buf);
+        audioBuffers.push(await file.arrayBuffer());
       }
-
-      const totalDuration = timeOffset;
-
-      // ── Step 2: Merge audio buffers ──
       const mergedBytes = mergeArrayBuffers(audioBuffers);
-
-      // Convert merged audio to base64 for the edge function
       const audioBase64 = arrayBufferToBase64(mergedBytes);
 
-      setProgress(30);
-      setStage('analyzing');
+      // Detect mime type from first file
+      const mimeType = files[0].type || 'audio/mp3';
 
-      // ── Step 3: Call analyze-audio — saves to DB, returns segments + sub_scenes ──
+      setProgress(20);
+
+      // ── Step 2: Call analyze-audio — Gemini transcribes + analyzes + saves to DB ──
       const { data: analyzeData, error: analyzeErr } = await supabase.functions.invoke('analyze-audio', {
-        body: {
-          projectId: project.id,
-          wordTimestamps: allWords,
-          fullText,
-          totalDuration,
-          audioBase64,
-        },
+        body: { projectId: project.id, audioBase64, mimeType },
       });
       if (analyzeErr) throw new Error(`Análise falhou: ${analyzeErr.message}`);
 
       setProgress(60);
       setStage('cutting');
 
-      // ── Step 4: Cut audio at sub-scene boundaries ──
+      // ── Step 3: Cut audio at sub-scene boundaries ──
       const segments: Array<Record<string, unknown> & { sub_scenes: Array<Record<string, unknown> & { _start: number; _end: number }> }> = analyzeData.segments || [];
       const cutTimes: number[] = [];
 
-      // Collect all cut points (start of each sub-scene except the very first)
       for (const seg of segments) {
-        for (let i = 0; i < seg.sub_scenes.length; i++) {
-          const sc = seg.sub_scenes[i];
-          if (cutTimes.length === 0 && sc._start === 0) continue;
-          if (!cutTimes.includes(sc._start)) cutTimes.push(sc._start);
+        for (const sc of seg.sub_scenes) {
+          if (sc._start > 0 && !cutTimes.includes(sc._start)) {
+            cutTimes.push(sc._start);
+          }
         }
       }
       cutTimes.sort((a, b) => a - b);
@@ -120,19 +87,7 @@ export function AudioUploadStep({ project, onUpdate, onSegmentsChange, onNext }:
       setProgress(80);
       setStage('uploading');
 
-      // ── Step 5: Upload each audio blob and update sub_scene record ──
-      // Build a flat ordered list of sub_scenes with their blob index
-      const orderedSubScenes: Array<{ segmentId: string; subSceneId: string; blobIndex: number }> = [];
-      for (const seg of segments) {
-        for (const sc of seg.sub_scenes) {
-          orderedSubScenes.push({
-            segmentId: seg.id as string,
-            subSceneId: sc.id as string,
-            blobIndex: orderedSubScenes.length,
-          });
-        }
-      }
-
+      // ── Step 4: Upload each audio blob and update sub_scene record ──
       const uploadedSegments: Segment[] = [];
       let uploadIdx = 0;
 
@@ -171,7 +126,8 @@ export function AudioUploadStep({ project, onUpdate, onSegmentsChange, onNext }:
       setProgress(100);
       setStage('done');
 
-      // ── Step 6: Update parent state ──
+      // ── Step 5: Update parent state ──
+      const totalDuration = analyzeData.totalDuration || 0;
       onSegmentsChange(uploadedSegments);
       onUpdate({
         status: 'segmented',
@@ -180,7 +136,6 @@ export function AudioUploadStep({ project, onUpdate, onSegmentsChange, onNext }:
         topic: analyzeData.topic || null,
       });
 
-      // Persist title update
       await supabase.from('projects').update({
         status: 'segmented',
         title: analyzeData.title || project.title,
@@ -222,7 +177,7 @@ export function AudioUploadStep({ project, onUpdate, onSegmentsChange, onNext }:
       <div>
         <h2 className="text-xl font-semibold">Upload do Áudio</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Envie o áudio do seu vídeo. A IA vai entender o conteúdo e criar automaticamente os segmentos e sub-cenas.
+          Envie o áudio do seu vídeo. A IA vai ouvir, entender o conteúdo e criar os segmentos automaticamente.
         </p>
       </div>
 
@@ -268,7 +223,7 @@ export function AudioUploadStep({ project, onUpdate, onSegmentsChange, onNext }:
           </div>
           {stage === 'analyzing' && (
             <p className="text-xs text-muted-foreground text-center max-w-xs">
-              Identificando tema, arco narrativo, momentos pedagógicos e criando cortes com propósito...
+              O Gemini está ouvindo o áudio, identificando o tema, arco narrativo e criando cortes com propósito...
             </p>
           )}
         </div>

@@ -1,15 +1,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
+const PRIMARY_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-2.5-flash-lite-preview-06-17";
 
-interface WordTimestamp { word: string; start: number; end: number; }
+interface Phrase { text: string; start: number; end: number; }
+
+interface Transcription {
+  full_text: string;
+  duration: number;
+  phrases: Phrase[];
+}
 
 interface SubSceneRaw {
   narration_segment?: string;
@@ -25,58 +31,55 @@ interface SegmentRaw {
   sub_scenes: SubSceneRaw[];
 }
 
-function buildTimestampedTranscript(words: WordTimestamp[]): string {
-  const lines: string[] = [];
-  let buffer: string[] = [];
-  let lineStart = 0;
-  for (let i = 0; i < words.length; i++) {
-    buffer.push(words[i].word);
-    if (buffer.length >= 6 || i === words.length - 1) {
-      lines.push(`[${lineStart.toFixed(1)}s] ${buffer.join(" ")}`);
-      buffer = [];
-      if (i + 1 < words.length) lineStart = words[i + 1].start;
-    }
-  }
-  return lines.join("\n");
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildTimestampedTranscript(phrases: Phrase[]): string {
+  return phrases.map(p => `[${p.start.toFixed(1)}s] ${p.text}`).join("\n");
 }
 
-function snapToWordBoundary(time: number, words: WordTimestamp[]): number {
-  if (words.length === 0) return time;
-  let best = words[0].start;
+function snapToPhraseBoundary(time: number, phrases: Phrase[]): number {
+  if (phrases.length === 0) return time;
+  let best = phrases[0].start;
   let bestDiff = Math.abs(time - best);
-  for (const w of words) {
-    const ds = Math.abs(w.start - time);
-    const de = Math.abs(w.end - time);
-    if (ds < bestDiff) { bestDiff = ds; best = w.start; }
-    if (de < bestDiff) { bestDiff = de; best = w.end; }
+  for (const p of phrases) {
+    const ds = Math.abs(p.start - time);
+    const de = Math.abs(p.end - time);
+    if (ds < bestDiff) { bestDiff = ds; best = p.start; }
+    if (de < bestDiff) { bestDiff = de; best = p.end; }
   }
   return best;
 }
 
-async function callGemini(apiKey: string, system: string, user: string, _model: string, jsonMode: boolean): Promise<string> {
+async function callGemini(
+  apiKey: string,
+  system: string,
+  user: string,
+  model: string,
+  jsonMode: boolean,
+  audioPart?: { mimeType: string; data: string },
+): Promise<string> {
+  const userParts: Record<string, unknown>[] = [];
+  if (audioPart) {
+    userParts.push({ inlineData: { mimeType: audioPart.mimeType, data: audioPart.data } });
+  }
+  userParts.push({ text: user });
+
   const body: Record<string, unknown> = {
     system_instruction: { parts: [{ text: system }] },
-    contents: [{ role: "user", parts: [{ text: user }] }],
-    generationConfig: { temperature: 0.4 },
+    contents: [{ role: "user", parts: userParts }],
+    generationConfig: { temperature: 0.3 },
   };
   if (jsonMode) (body.generationConfig as Record<string, unknown>).responseMimeType = "application/json";
 
-  let lastErr = "";
-  for (const model of MODELS) {
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-    );
-    if (resp.ok) {
-      const data = await resp.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error("Gemini returned no content");
-      return text;
-    }
-    lastErr = (await resp.text()).slice(0, 300);
-    console.warn(`Model ${model} failed [${resp.status}], trying next...`);
-  }
-  throw new Error(`All Gemini models failed. Last error: ${lastErr}`);
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+  if (!resp.ok) throw new Error(`Gemini [${resp.status}]: ${(await resp.text()).slice(0, 400)}`);
+  const data = await resp.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("Gemini returned no content");
+  return text;
 }
 
 function parseJSON(raw: string): unknown {
@@ -86,19 +89,19 @@ function parseJSON(raw: string): unknown {
   throw new Error(`Cannot parse JSON: ${raw.slice(0, 200)}`);
 }
 
+// ── Main handler ─────────────────────────────────────────────────────────────
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { projectId, wordTimestamps, fullText, totalDuration, audioBase64 } = await req.json() as {
+    const { projectId, audioBase64, mimeType } = await req.json() as {
       projectId: string;
-      wordTimestamps: WordTimestamp[];
-      fullText: string;
-      totalDuration: number;
-      audioBase64: string; // full merged audio as base64 WAV/MP3
+      audioBase64: string;
+      mimeType: string;
     };
 
-    if (!projectId || !wordTimestamps?.length) throw new Error("projectId and wordTimestamps required");
+    if (!projectId || !audioBase64) throw new Error("projectId and audioBase64 required");
 
     const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
     if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY not configured");
@@ -108,10 +111,43 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const transcript = buildTimestampedTranscript(wordTimestamps);
+    // Normalise mime type
+    const audioMime = (mimeType && mimeType.startsWith("audio/")) ? mimeType : "audio/mp3";
+    const audioPart = { mimeType: audioMime, data: audioBase64 };
+
+    // ─── PASS 0: Transcription with phrase-level timestamps ──────────────────
+    const pass0System = `Você é um transcritor preciso de áudio em português brasileiro.`;
+    const pass0User = `Transcreva este áudio e retorne APENAS um JSON válido com a seguinte estrutura:
+{
+  "full_text": "transcrição completa do áudio",
+  "duration": 120.5,
+  "phrases": [
+    { "text": "frase falada", "start": 0.0, "end": 4.5 },
+    { "text": "próxima frase", "start": 4.5, "end": 9.2 }
+  ]
+}
+
+REGRAS:
+- Cada "phrase" deve ter 1-3 frases curtas agrupadas logicamente
+- "start" e "end" são timestamps em segundos (float)
+- "duration" é a duração total do áudio em segundos
+- Não inclua nada além do JSON`;
+
+    let transcription: Transcription;
+    try {
+      const raw0 = await callGemini(GOOGLE_AI_API_KEY, pass0System, pass0User, PRIMARY_MODEL, true, audioPart);
+      transcription = parseJSON(raw0) as Transcription;
+    } catch {
+      const raw0 = await callGemini(GOOGLE_AI_API_KEY, pass0System, pass0User, FALLBACK_MODEL, true, audioPart);
+      transcription = parseJSON(raw0) as Transcription;
+    }
+
+    const { full_text: fullText, duration: totalDuration, phrases } = transcription;
+    if (!phrases?.length) throw new Error("Gemini não retornou phrases na transcrição");
+
     const estimatedSubScenes = Math.max(Math.round(totalDuration / 7), 4);
 
-    // ─── PASS 1: Deep content analysis ─────────────────────────────────────────
+    // ─── PASS 1: Deep content analysis ──────────────────────────────────────
     const pass1System = `Você é um especialista em conteúdo educacional para o ENEM e em narrativa de vídeo. Analise a transcrição fornecida com profundidade.`;
 
     const pass1User = `TRANSCRIÇÃO DO VÍDEO:
@@ -136,15 +172,23 @@ Analise este vídeo e retorne um JSON com:
   ]
 }`;
 
-    const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, "", true);
-    const analysis = parseJSON(raw1) as Record<string, unknown>;
+    let analysis: Record<string, unknown>;
+    try {
+      const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, PRIMARY_MODEL, true);
+      analysis = parseJSON(raw1) as Record<string, unknown>;
+    } catch {
+      const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, FALLBACK_MODEL, true);
+      analysis = parseJSON(raw1) as Record<string, unknown>;
+    }
 
-    // ─── PASS 2: Intelligent segmentation using Pass 1 context ─────────────────
+    // ─── PASS 2: Intelligent segmentation using Pass 1 context ──────────────
     const blocksContext = Array.isArray(analysis.blocks)
       ? (analysis.blocks as Record<string, string>[]).map((b, i) =>
           `${i + 1}. [${b.function}] "${b.text_preview}" — ${b.pedagogical_value}`
         ).join("\n")
       : "";
+
+    const transcript = buildTimestampedTranscript(phrases);
 
     const pass2System = `Você é um editor de vídeo educacional especialista em conteúdo ENEM. Cada corte que você faz tem um PROPÓSITO narrativo e pedagógico — você não corta por tempo, você corta por significado.`;
 
@@ -198,21 +242,17 @@ Retorne JSON:
   ]
 }`;
 
-    const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, "", true);
-    const segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
-
-    // Sanitize: ensure every sub_scene has narration_segment, filter empty ones
-    for (const seg of segmentation.segments) {
-      seg.sub_scenes = (seg.sub_scenes || [])
-        .map((sc) => ({ ...sc, narration_segment: (sc.narration_segment || sc.narration || "").trim() }))
-        .filter((sc) => sc.narration_segment.length > 0);
+    let segmentation: { segments: SegmentRaw[] };
+    try {
+      const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, PRIMARY_MODEL, true);
+      segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
+    } catch {
+      const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, FALLBACK_MODEL, true);
+      segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
     }
-    // Remove segments with no valid sub_scenes
-    segmentation.segments = segmentation.segments.filter((s) => s.sub_scenes.length > 0);
 
-    // ─── Save to DB ──────────────────────────────────────────────────────────────
+    // ─── Save to DB ──────────────────────────────────────────────────────────
 
-    // Update project metadata
     await supabase.from("projects").update({
       title: analysis.title as string,
       subject: analysis.subject as string,
@@ -221,7 +261,7 @@ Retorne JSON:
       updated_at: new Date().toISOString(),
     }).eq("id", projectId);
 
-    // Delete existing segments (cascades to sub_scenes if FK with cascade, else delete manually)
+    // Delete existing segments + sub_scenes
     const { data: existingSegs } = await supabase.from("segments").select("id").eq("project_id", projectId);
     if (existingSegs && existingSegs.length > 0) {
       const segIds = existingSegs.map((s: { id: string }) => s.id);
@@ -229,10 +269,6 @@ Retorne JSON:
       await supabase.from("segments").delete().eq("project_id", projectId);
     }
 
-    // Decode audio for cutting
-    const audioBytes = base64Decode(audioBase64);
-
-    // Insert segments + sub-scenes and cut audio
     const validMomentTypes = ["hook", "concept", "example", "list_summary", "cta"];
     const createdSegments: Record<string, unknown>[] = [];
 
@@ -246,7 +282,7 @@ Retorne JSON:
         .insert({
           project_id: projectId,
           sequence_number: seqNum,
-          narration: seg.sub_scenes.map((sc) => sc.narration_segment || sc.narration || "").filter(Boolean).join(" "),
+          narration: seg.sub_scenes.map((sc) => sc.narration_segment || sc.narration || "").join(" "),
           moment_type: momentType,
           image_status: "idle",
           audio_status: "idle",
@@ -260,9 +296,9 @@ Retorne JSON:
 
       for (let sci = 0; sci < seg.sub_scenes.length; sci++) {
         const sc = seg.sub_scenes[sci];
-        const startSnapped = snapToWordBoundary(sc.start_time, wordTimestamps);
+        const startSnapped = snapToPhraseBoundary(sc.start_time, phrases);
         const endSnapped = sci < seg.sub_scenes.length - 1
-          ? snapToWordBoundary(sc.end_time, wordTimestamps)
+          ? snapToPhraseBoundary(sc.end_time, phrases)
           : sc.end_time;
 
         const { data: insertedSc, error: scErr } = await supabase
@@ -280,26 +316,11 @@ Retorne JSON:
 
         if (scErr) throw new Error(`Failed to insert sub_scene: ${scErr.message}`);
 
-        // Cut and upload audio slice
-        try {
-          // Determine byte range for this time slice
-          // audioBytes is raw audio — we store start/end times and let client cut,
-          // OR we do a simple proportional byte slice for WAV
-          // For simplicity: upload a marker and let the client handle cutting
-          // Actually we pass the audio back to client for cutting — see response below
-          insertedSubScenes.push({
-            ...(insertedSc as Record<string, unknown>),
-            _start: Math.max(0, startSnapped),
-            _end: Math.min(totalDuration, endSnapped),
-          });
-        } catch (e) {
-          console.warn(`Audio slice failed for sub_scene ${sci + 1}:`, e);
-          insertedSubScenes.push({
-            ...(insertedSc as Record<string, unknown>),
-            _start: Math.max(0, startSnapped),
-            _end: Math.min(totalDuration, endSnapped),
-          });
-        }
+        insertedSubScenes.push({
+          ...(insertedSc as Record<string, unknown>),
+          _start: Math.max(0, startSnapped),
+          _end: Math.min(totalDuration, endSnapped),
+        });
       }
 
       createdSegments.push({
@@ -308,7 +329,6 @@ Retorne JSON:
       });
     }
 
-    // Update project status
     await supabase.from("projects").update({
       status: "segmented",
       updated_at: new Date().toISOString(),
@@ -318,6 +338,7 @@ Retorne JSON:
       title: analysis.title,
       subject: analysis.subject,
       topic: analysis.topic,
+      totalDuration,
       segments: createdSegments,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
