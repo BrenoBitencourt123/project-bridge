@@ -246,7 +246,7 @@ Retorne JSON:
         .insert({
           project_id: projectId,
           sequence_number: seqNum,
-          narration: seg.sub_scenes.map((sc) => sc.narration_segment).join(" "),
+          narration: seg.sub_scenes.map((sc) => sc.narration_segment || sc.narration || "").filter(Boolean).join(" "),
           moment_type: momentType,
           image_status: "idle",
           audio_status: "idle",
