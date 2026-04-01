@@ -53,7 +53,7 @@ function snapToWordBoundary(time: number, words: WordTimestamp[]): number {
   return best;
 }
 
-async function callGemini(apiKey: string, system: string, user: string, model: string, jsonMode: boolean): Promise<string> {
+async function callGemini(apiKey: string, system: string, user: string, _model: string, jsonMode: boolean): Promise<string> {
   const body: Record<string, unknown> = {
     system_instruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts: [{ text: user }] }],
@@ -61,15 +61,22 @@ async function callGemini(apiKey: string, system: string, user: string, model: s
   };
   if (jsonMode) (body.generationConfig as Record<string, unknown>).responseMimeType = "application/json";
 
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-  );
-  if (!resp.ok) throw new Error(`Gemini [${resp.status}]: ${(await resp.text()).slice(0, 300)}`);
-  const data = await resp.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini returned no content");
-  return text;
+  let lastErr = "";
+  for (const model of MODELS) {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    );
+    if (resp.ok) {
+      const data = await resp.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Gemini returned no content");
+      return text;
+    }
+    lastErr = (await resp.text()).slice(0, 300);
+    console.warn(`Model ${model} failed [${resp.status}], trying next...`);
+  }
+  throw new Error(`All Gemini models failed. Last error: ${lastErr}`);
 }
 
 function parseJSON(raw: string): unknown {
