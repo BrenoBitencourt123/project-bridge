@@ -136,14 +136,8 @@ Analise este vídeo e retorne um JSON com:
   ]
 }`;
 
-    let analysis: Record<string, unknown>;
-    try {
-      const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, PRIMARY_MODEL, true);
-      analysis = parseJSON(raw1) as Record<string, unknown>;
-    } catch {
-      const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, FALLBACK_MODEL, true);
-      analysis = parseJSON(raw1) as Record<string, unknown>;
-    }
+    const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, "", true);
+    const analysis = parseJSON(raw1) as Record<string, unknown>;
 
     // ─── PASS 2: Intelligent segmentation using Pass 1 context ─────────────────
     const blocksContext = Array.isArray(analysis.blocks)
