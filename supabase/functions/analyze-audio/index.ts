@@ -7,8 +7,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const PRIMARY_MODEL = "gemini-2.5-flash";
-const FALLBACK_MODEL = "gemini-2.5-flash-lite-preview-06-17";
+const MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
 
 interface WordTimestamp { word: string; start: number; end: number; }
 
