@@ -13,8 +13,9 @@ const FALLBACK_MODEL = "gemini-2.5-flash-lite-preview-06-17";
 interface WordTimestamp { word: string; start: number; end: number; }
 
 interface SubSceneRaw {
-  narration_segment: string;
-  image_prompt: string;
+  narration_segment?: string;
+  narration?: string;
+  image_prompt?: string;
   start_time: number;
   end_time: number;
 }
@@ -266,8 +267,8 @@ Retorne JSON:
           .insert({
             segment_id: (insertedSeg as { id: string }).id,
             sub_index: sci + 1,
-            narration_segment: sc.narration_segment,
-            image_prompt: sc.image_prompt,
+            narration_segment: sc.narration_segment || sc.narration || "",
+            image_prompt: sc.image_prompt || null,
             image_status: "idle",
             audio_status: "idle",
           })
