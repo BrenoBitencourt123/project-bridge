@@ -151,7 +151,7 @@ export function AudioUploadStep({ project, onUpdate, onSegmentsChange, onNext }:
             audioUrl = urlData.publicUrl + `?t=${Date.now()}`;
             await supabase.from('sub_scenes').update({ audio_url: audioUrl, audio_status: 'done' }).eq('id', sc.id);
           } else {
-            console.warn(`Upload falhou para sub_scene ${sc.id as string}:`, upErr);
+            console.warn(`Upload falhou para sub_scene ${String(sc.id)}:`, upErr);
           }
 
           subScenesUpdated.push({
