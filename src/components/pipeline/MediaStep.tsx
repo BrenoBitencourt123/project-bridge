@@ -240,7 +240,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         audioBytes = Uint8Array.from(atob(data.fullAudioBase64), c => c.charCodeAt(0));
       }
 
-      await applyAudioSegmentation(segData.segmentedSubScenes, audioBytes.buffer, totalDuration);
+      await applyAudioSegmentation(segData.segmentedSubScenes, audioBytes.buffer as ArrayBuffer, totalDuration);
 
       await supabase.from('projects').update({ status: 'audio_done', updated_at: new Date().toISOString() }).eq('id', project.id);
       onUpdate({ status: 'audio_done' });
