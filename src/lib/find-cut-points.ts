@@ -1,6 +1,6 @@
 import type { Alignment, Segment, SubScene } from '@/types/atlas';
 
-const MIN_GAP_SECONDS = 7;
+const MIN_GAP_SECONDS = 2;
 
 /**
  * Normalize text for fuzzy matching: remove accents, punctuation, lowercase, collapse spaces.
