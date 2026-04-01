@@ -198,14 +198,17 @@ Retorne JSON:
   ]
 }`;
 
-    let segmentation: { segments: SegmentRaw[] };
-    try {
-      const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, PRIMARY_MODEL, true);
-      segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
-    } catch {
-      const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, FALLBACK_MODEL, true);
-      segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
+    const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, "", true);
+    const segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
+
+    // Sanitize: ensure every sub_scene has narration_segment, filter empty ones
+    for (const seg of segmentation.segments) {
+      seg.sub_scenes = (seg.sub_scenes || [])
+        .map((sc) => ({ ...sc, narration_segment: (sc.narration_segment || sc.narration || "").trim() }))
+        .filter((sc) => sc.narration_segment.length > 0);
     }
+    // Remove segments with no valid sub_scenes
+    segmentation.segments = segmentation.segments.filter((s) => s.sub_scenes.length > 0);
 
     // ─── Save to DB ──────────────────────────────────────────────────────────────
 
