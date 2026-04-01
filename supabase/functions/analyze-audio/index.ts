@@ -7,8 +7,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const PRIMARY_MODEL = "gemini-2.5-flash";
-const FALLBACK_MODEL = "gemini-2.5-flash-lite-preview-06-17";
+const MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
 
 interface WordTimestamp { word: string; start: number; end: number; }
 
@@ -54,7 +53,7 @@ function snapToWordBoundary(time: number, words: WordTimestamp[]): number {
   return best;
 }
 
-async function callGemini(apiKey: string, system: string, user: string, model: string, jsonMode: boolean): Promise<string> {
+async function callGemini(apiKey: string, system: string, user: string, _model: string, jsonMode: boolean): Promise<string> {
   const body: Record<string, unknown> = {
     system_instruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts: [{ text: user }] }],
@@ -62,15 +61,22 @@ async function callGemini(apiKey: string, system: string, user: string, model: s
   };
   if (jsonMode) (body.generationConfig as Record<string, unknown>).responseMimeType = "application/json";
 
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-  );
-  if (!resp.ok) throw new Error(`Gemini [${resp.status}]: ${(await resp.text()).slice(0, 300)}`);
-  const data = await resp.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini returned no content");
-  return text;
+  let lastErr = "";
+  for (const model of MODELS) {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    );
+    if (resp.ok) {
+      const data = await resp.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Gemini returned no content");
+      return text;
+    }
+    lastErr = (await resp.text()).slice(0, 300);
+    console.warn(`Model ${model} failed [${resp.status}], trying next...`);
+  }
+  throw new Error(`All Gemini models failed. Last error: ${lastErr}`);
 }
 
 function parseJSON(raw: string): unknown {
@@ -130,14 +136,8 @@ Analise este vídeo e retorne um JSON com:
   ]
 }`;
 
-    let analysis: Record<string, unknown>;
-    try {
-      const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, PRIMARY_MODEL, true);
-      analysis = parseJSON(raw1) as Record<string, unknown>;
-    } catch {
-      const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, FALLBACK_MODEL, true);
-      analysis = parseJSON(raw1) as Record<string, unknown>;
-    }
+    const raw1 = await callGemini(GOOGLE_AI_API_KEY, pass1System, pass1User, "", true);
+    const analysis = parseJSON(raw1) as Record<string, unknown>;
 
     // ─── PASS 2: Intelligent segmentation using Pass 1 context ─────────────────
     const blocksContext = Array.isArray(analysis.blocks)
@@ -198,14 +198,17 @@ Retorne JSON:
   ]
 }`;
 
-    let segmentation: { segments: SegmentRaw[] };
-    try {
-      const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, PRIMARY_MODEL, true);
-      segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
-    } catch {
-      const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, FALLBACK_MODEL, true);
-      segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
+    const raw2 = await callGemini(GOOGLE_AI_API_KEY, pass2System, pass2User, "", true);
+    const segmentation = parseJSON(raw2) as { segments: SegmentRaw[] };
+
+    // Sanitize: ensure every sub_scene has narration_segment, filter empty ones
+    for (const seg of segmentation.segments) {
+      seg.sub_scenes = (seg.sub_scenes || [])
+        .map((sc) => ({ ...sc, narration_segment: (sc.narration_segment || sc.narration || "").trim() }))
+        .filter((sc) => sc.narration_segment.length > 0);
     }
+    // Remove segments with no valid sub_scenes
+    segmentation.segments = segmentation.segments.filter((s) => s.sub_scenes.length > 0);
 
     // ─── Save to DB ──────────────────────────────────────────────────────────────
 
@@ -243,7 +246,7 @@ Retorne JSON:
         .insert({
           project_id: projectId,
           sequence_number: seqNum,
-          narration: seg.sub_scenes.map((sc) => sc.narration_segment).join(" "),
+          narration: seg.sub_scenes.map((sc) => sc.narration_segment || sc.narration || "").filter(Boolean).join(" "),
           moment_type: momentType,
           image_status: "idle",
           audio_status: "idle",
