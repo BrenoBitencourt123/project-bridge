@@ -106,10 +106,10 @@ export const MOMENT_TYPE_CONFIG: Record<MomentType, { label: string; color: stri
 export function getMaxStep(status: ProjectStatus): number {
   switch (status) {
     case 'draft': return 0;
-    case 'scripted': return 1;
+    case 'scripted':
     case 'segmented':
-    case 'images_done': return 2;
-    case 'audio_done':
-    case 'complete': return 3;
+    case 'images_done':
+    case 'audio_done': return 1;
+    case 'complete': return 2;
   }
 }

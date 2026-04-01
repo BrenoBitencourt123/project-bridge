@@ -4,9 +4,7 @@ import { Plus, ImageIcon, Sparkles, Loader2, Trash2, Video, CheckCircle2, Clock 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,10 +18,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [newProjectOpen, setNewProjectOpen] = useState(false);
-  const [pasteScript, setPasteScript] = useState('');
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [generatingScript, setGeneratingScript] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
   const [thumbnailDialog, setThumbnailDialog] = useState<{ open: boolean; project: Project | null }>({ open: false, project: null });
   const [thumbnailPrompt, setThumbnailPrompt] = useState('');
   const [generatingThumbnail, setGeneratingThumbnail] = useState(false);
@@ -40,25 +35,23 @@ export default function Dashboard() {
     },
   });
 
-  const createProject = useMutation({
-    mutationFn: async ({ title, raw_script }: { title: string; raw_script: string }) => {
+  const handleNewProject = async () => {
+    setCreatingProject(true);
+    try {
       const { data, error } = await supabase
         .from('projects')
-        .insert({ user_id: user!.id, title, raw_script, status: 'scripted' })
+        .insert({ user_id: user!.id, title: 'Novo Projeto', status: 'draft' })
         .select()
         .single();
       if (error) throw error;
-      return data;
-    },
-    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
-      setNewProjectOpen(false);
-      setPasteScript('');
-      setAiPrompt('');
-      navigate(`/project/${data.id}`);
-    },
-    onError: (err: any) => toast({ title: 'Erro ao criar projeto', description: err.message, variant: 'destructive' }),
-  });
+      navigate(`/project/${(data as any).id}`);
+    } catch (err: any) {
+      toast({ title: 'Erro ao criar projeto', description: err.message, variant: 'destructive' });
+    } finally {
+      setCreatingProject(false);
+    }
+  };
 
   const deleteProject = useMutation({
     mutationFn: async (projectId: string) => {
@@ -79,29 +72,6 @@ export default function Dashboard() {
     },
     onError: (err: any) => toast({ title: 'Erro', description: err.message, variant: 'destructive' }),
   });
-
-  const handlePasteCreate = () => {
-    if (!pasteScript.trim()) return;
-    const title = pasteScript.trim().split(/\s+/).slice(0, 6).join(' ');
-    createProject.mutate({ title, raw_script: pasteScript });
-  };
-
-  const handleAiGenerate = async () => {
-    if (!aiPrompt.trim()) return;
-    setGeneratingScript(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('generate-script', {
-        body: { freePrompt: aiPrompt },
-      });
-      if (error) throw error;
-      const title = data.script.trim().split(/\s+/).slice(0, 6).join(' ');
-      createProject.mutate({ title, raw_script: data.script });
-    } catch (err: any) {
-      toast({ title: 'Erro ao gerar roteiro', description: err.message, variant: 'destructive' });
-    } finally {
-      setGeneratingScript(false);
-    }
-  };
 
   const handleGenerateThumbnail = async () => {
     if (!thumbnailDialog.project || !thumbnailPrompt.trim()) return;
@@ -169,39 +139,13 @@ export default function Dashboard() {
           <h1 className="text-xl font-bold">Projetos</h1>
           <p className="text-sm text-muted-foreground">Seus vídeos em produção</p>
         </div>
-          <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> Novo Projeto</Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Novo Projeto</DialogTitle>
-              </DialogHeader>
-              <Tabs defaultValue="paste">
-                <TabsList className="w-full">
-                  <TabsTrigger value="paste" className="flex-1">Colar roteiro</TabsTrigger>
-                  <TabsTrigger value="ai" className="flex-1">Gerar com IA</TabsTrigger>
-                </TabsList>
-                <TabsContent value="paste" className="space-y-4 pt-4">
-                  <Textarea placeholder="Cole seu roteiro aqui..." value={pasteScript} onChange={e => setPasteScript(e.target.value)} rows={8} />
-                  <Button className="w-full" onClick={handlePasteCreate} disabled={!pasteScript.trim() || createProject.isPending}>
-                    {createProject.isPending && <Loader2 className="animate-spin" />}
-                    Criar projeto
-                  </Button>
-                </TabsContent>
-                <TabsContent value="ai" className="space-y-4 pt-4">
-                  <Textarea placeholder="Descreva o vídeo que deseja criar..." value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} rows={4} />
-                  <Button className="w-full" onClick={handleAiGenerate} disabled={!aiPrompt.trim() || generatingScript}>
-                    {generatingScript && <Loader2 className="animate-spin" />}
-                    <Sparkles className="h-4 w-4" /> Gerar Roteiro
-                  </Button>
-                </TabsContent>
-              </Tabs>
-            </DialogContent>
-          </Dialog>
-        </div>
+        <Button onClick={handleNewProject} disabled={creatingProject}>
+          {creatingProject ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          Novo Projeto
+        </Button>
+      </div>
 
-        {isLoading ? (
+      {isLoading ? (
           <div className="flex justify-center py-20">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>

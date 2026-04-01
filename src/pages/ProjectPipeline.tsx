@@ -7,8 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { Project, Segment, SubScene, getMaxStep } from '@/types/atlas';
 import { StepperHeader } from '@/components/pipeline/StepperHeader';
-import { ScriptStep } from '@/components/pipeline/ScriptStep';
-import { SegmentsStep } from '@/components/pipeline/SegmentsStep';
+import { AudioUploadStep } from '@/components/pipeline/AudioUploadStep';
 import { MediaStep } from '@/components/pipeline/MediaStep';
 import { ExportStep } from '@/components/pipeline/ExportStep';
 
@@ -33,17 +32,14 @@ export default function ProjectPipeline() {
   const { data: segments = [] } = useQuery({
     queryKey: ['segments', id],
     queryFn: async () => {
-      // Fetch segments
       const { data: segs, error } = await supabase
         .from('segments')
         .select('*')
         .eq('project_id', id!)
         .order('sequence_number');
       if (error) throw error;
-
       if (!segs || segs.length === 0) return [] as Segment[];
 
-      // Fetch sub_scenes for all segments
       const segmentIds = segs.map(s => s.id);
       const { data: subScenes, error: subErr } = await supabase
         .from('sub_scenes')
@@ -53,7 +49,6 @@ export default function ProjectPipeline() {
 
       if (subErr) console.error('Error loading sub_scenes:', subErr);
 
-      // Attach sub_scenes to segments
       return segs.map(seg => ({
         ...seg,
         sub_scenes: (subScenes || [])
@@ -67,7 +62,8 @@ export default function ProjectPipeline() {
     if (project) {
       setLocalProject(project);
       setTitleDraft(project.title);
-      setCurrentStep(Math.min(currentStep, getMaxStep(project.status)));
+      const max = getMaxStep(project.status);
+      setCurrentStep(prev => Math.min(prev, max));
     }
   }, [project]);
 
@@ -100,7 +96,6 @@ export default function ProjectPipeline() {
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
       <header className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
           <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
@@ -116,8 +111,11 @@ export default function ProjectPipeline() {
               className="text-lg font-semibold h-auto py-1"
             />
           ) : (
-            <h1 className="text-lg font-semibold cursor-pointer truncate hover:text-primary" onClick={() => setEditingTitle(true)}>
-              {localProject.title}
+            <h1
+              className="text-lg font-semibold cursor-pointer truncate hover:text-primary"
+              onClick={() => setEditingTitle(true)}
+            >
+              {localProject.title || 'Novo Projeto'}
             </h1>
           )}
         </div>
@@ -126,18 +124,29 @@ export default function ProjectPipeline() {
         </div>
       </header>
 
-      {/* Content */}
       <main className="mx-auto max-w-5xl px-4 py-6">
         {currentStep === 0 && (
-          <ScriptStep project={localProject} onUpdate={updateProject} onNext={() => setCurrentStep(1)} />
+          <AudioUploadStep
+            project={localProject}
+            onUpdate={updates => {
+              updateProject(updates);
+              if (updates.status === 'segmented') setCurrentStep(1);
+            }}
+            onSegmentsChange={setLocalSegments}
+            onNext={() => setCurrentStep(1)}
+          />
         )}
         {currentStep === 1 && (
-          <SegmentsStep project={localProject} segments={localSegments} onSegmentsChange={setLocalSegments} onUpdate={updateProject} onNext={() => setCurrentStep(2)} />
+          <MediaStep
+            project={localProject}
+            segments={localSegments}
+            onSegmentsChange={setLocalSegments}
+            onUpdate={updateProject}
+            onNext={() => setCurrentStep(2)}
+            onGeneratingChange={setIsGenerating}
+          />
         )}
         {currentStep === 2 && (
-          <MediaStep project={localProject} segments={localSegments} onSegmentsChange={setLocalSegments} onUpdate={updateProject} onNext={() => setCurrentStep(3)} onGeneratingChange={setIsGenerating} />
-        )}
-        {currentStep === 3 && (
           <ExportStep projectTitle={localProject.title} segments={localSegments} />
         )}
       </main>

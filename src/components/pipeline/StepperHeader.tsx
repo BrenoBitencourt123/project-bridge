@@ -1,11 +1,10 @@
-import { FileText, Layers, Image, Download } from 'lucide-react';
+import { Music, Image, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const STEPS = [
-  { label: 'Roteiro', icon: FileText },
-  { label: 'Segmentos', icon: Layers },
-  { label: 'Imagens & Áudio', icon: Image },
+  { label: 'Áudio', icon: Music },
+  { label: 'Revisão', icon: Image },
   { label: 'Export', icon: Download },
 ];
 
