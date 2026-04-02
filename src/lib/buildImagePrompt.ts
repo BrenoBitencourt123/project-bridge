@@ -9,6 +9,8 @@ const STYLE_SEEDS: Record<string, string> = {
 
   impacto: `ESTILO MESTRE (aplique em todos os elementos): Ilustração cartoon/quadrinho com texturas de meio-tom (halftone) e sombreamento pop-art retrô. Paleta quente e rica: âmbar (#F5A623), laranja (#E8610A), azul-teal (#1A9E9E), marrom (#7B4F2E), verde terroso (#5A7A3A). Técnica: contornos pretos espessos, halftone nas sombras, alto contraste dramático. Feel: quadrinho educacional, energia, impacto visual imediato. NUNCA use neon, NUNCA use pastel, NUNCA use realismo fotográfico.`,
 
+  pintura: `ESTILO MESTRE (aplique em todos os elementos): Pintura digital texturizada, estilo arte conceitual de mesa digitalizadora. Visíveis pinceladas de tinta digital e texturas de superfície. Técnica: sobreposição de camadas de cores e pinceladas expressivas e não polidas. O acabamento não é liso; é texturizado e tátil. Feel: arte conceitual imersiva, artesanal, focada na inspeção de dados. NUNCA use renderização 3D lisa ou estilo de animação limpo.`,
+
   padrao: `ESTILO MESTRE (aplique em todos os elementos): Ilustração desenhada à mão, estilo esboço educacional clean, papel bege/creme suave (#F5F0E8). Paleta: tons de cinza (#444444 traços) com APENAS azul (#4A90E2) como cor de destaque — use o azul somente para o elemento mais importante da cena. Técnica: hachura leve a lápis, linhas limpas, aspecto de material didático profissional. Feel: startup de educação, clean, moderno e confiável. NUNCA use cores fora desta paleta.`,
 };
 
@@ -101,4 +103,5 @@ export const STYLE_OPTIONS = [
   { value: 'padrao', label: 'Padrão (educacional azul)' },
   { value: 'sketch', label: 'Sketch (esboço laranja)' },
   { value: 'impacto', label: 'Impacto (cartoon retrô)' },
+  { value: 'pintura', label: 'Pintura digital texturizada' },
 ];
