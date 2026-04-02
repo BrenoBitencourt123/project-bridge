@@ -68,6 +68,7 @@ export default function ProjectPipeline() {
   }, [project]);
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [geminiStyle, setGeminiStyle] = useState('padrao');
 
   useEffect(() => {
     if (segments.length > 0 && !isGenerating) setLocalSegments(segments);
@@ -144,10 +145,12 @@ export default function ProjectPipeline() {
             onUpdate={updateProject}
             onNext={() => setCurrentStep(2)}
             onGeneratingChange={setIsGenerating}
+            geminiStyle={geminiStyle}
+            onStyleChange={setGeminiStyle}
           />
         )}
         {currentStep === 2 && (
-          <ExportStep projectTitle={localProject.title} segments={localSegments} />
+          <ExportStep projectTitle={localProject.title} segments={localSegments} geminiStyle={geminiStyle} />
         )}
       </main>
     </div>

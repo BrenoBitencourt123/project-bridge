@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { Project, Segment, SubScene } from '@/types/atlas';
 import { useToast } from '@/hooks/use-toast';
+import { STYLE_OPTIONS } from '@/lib/buildImagePrompt';
 
 interface MediaStepProps {
   project: Project;
@@ -12,9 +13,11 @@ interface MediaStepProps {
   onUpdate: (updates: Partial<Project>) => void;
   onNext: () => void;
   onGeneratingChange?: (generating: boolean) => void;
+  geminiStyle: string;
+  onStyleChange: (style: string) => void;
 }
 
-export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange }: MediaStepProps) {
+export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange, geminiStyle, onStyleChange }: MediaStepProps) {
   const { toast } = useToast();
   const [regenerating, setRegenerating] = useState(false);
 
@@ -119,6 +122,24 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
               {regenerating ? <Loader2 className="animate-spin h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
               Regenerar Prompts
             </Button>
+          </div>
+        </div>
+
+        {/* Seletor de estilo visual */}
+        <div className="space-y-2">
+          <p className="text-xs font-medium">Estilo visual das imagens</p>
+          <div className="flex gap-2 flex-wrap">
+            {STYLE_OPTIONS.map(o => (
+              <Button
+                key={o.value}
+                variant={geminiStyle === o.value ? 'default' : 'outline'}
+                size="sm"
+                className="text-xs h-7"
+                onClick={() => onStyleChange(o.value)}
+              >
+                {o.label}
+              </Button>
+            ))}
           </div>
         </div>
 

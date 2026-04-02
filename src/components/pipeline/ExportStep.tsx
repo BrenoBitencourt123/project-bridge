@@ -2,20 +2,19 @@ import { useState } from 'react';
 import { Download, Volume2, Loader2, Copy, Check, ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Segment } from '@/types/atlas';
 import JSZip from 'jszip';
-import { buildImagePrompt, STYLE_OPTIONS } from '@/lib/buildImagePrompt';
+import { buildImagePrompt } from '@/lib/buildImagePrompt';
 
 interface ExportStepProps {
   projectTitle: string;
   segments: Segment[];
+  geminiStyle: string;
 }
 
-export function ExportStep({ projectTitle, segments }: ExportStepProps) {
+export function ExportStep({ projectTitle, segments, geminiStyle }: ExportStepProps) {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [geminiStyle, setGeminiStyle] = useState('padrao');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
@@ -151,16 +150,6 @@ export function ExportStep({ projectTitle, segments }: ExportStepProps) {
             <span className="text-xs text-muted-foreground">({geminiSubScenes.length} imagens)</span>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={geminiStyle} onValueChange={setGeminiStyle}>
-              <SelectTrigger className="h-7 text-xs w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STYLE_OPTIONS.map(o => (
-                  <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button variant="outline" size="sm" onClick={handleCopyAll}>
               {copiedAll ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
               {copiedAll ? 'Copiado!' : 'Copiar todos'}
