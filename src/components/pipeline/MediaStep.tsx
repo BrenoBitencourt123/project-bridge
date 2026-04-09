@@ -21,6 +21,22 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
   const { toast } = useToast();
   const [regenerating, setRegenerating] = useState(false);
 
+  const { data: styleOptions = [] } = useQuery({
+    queryKey: ['style-templates-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('image_style_templates')
+        .select('name, prompt_prefix')
+        .order('is_default', { ascending: false })
+        .order('name');
+      if (error) throw error;
+      return (data || []).map(t => ({
+        value: t.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
+        label: t.name,
+      }));
+    },
+  });
+
   const allSubScenes = segments.flatMap(s => s.sub_scenes || []);
   const subAudiosDone = allSubScenes.filter(sc => sc.audio_status === 'done').length;
   const totalSubScenes = allSubScenes.length;
