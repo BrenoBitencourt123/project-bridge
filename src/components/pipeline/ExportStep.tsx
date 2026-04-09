@@ -10,9 +10,10 @@ interface ExportStepProps {
   projectTitle: string;
   segments: Segment[];
   geminiStyle: string;
+  stylePromptPrefix?: string;
 }
 
-export function ExportStep({ projectTitle, segments, geminiStyle }: ExportStepProps) {
+export function ExportStep({ projectTitle, segments, geminiStyle, stylePromptPrefix }: ExportStepProps) {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -31,6 +32,7 @@ export function ExportStep({ projectTitle, segments, geminiStyle }: ExportStepPr
           imagePrompt: sc.image_prompt || seg.image_prompt || sc.narration_segment,
           narration: sc.narration_segment,
           styleName: geminiStyle === 'padrao' ? '' : geminiStyle,
+          stylePrefix: stylePromptPrefix || undefined,
           subIndex: sc.sub_index,
           totalSubScenes: total,
         });

@@ -58,6 +58,8 @@ export interface BuildImagePromptParams {
   imagePrompt: string;
   narration?: string;
   styleName?: string;
+  /** Direct style prefix from DB — takes priority over styleName lookup */
+  stylePrefix?: string;
   subIndex?: number;
   totalSubScenes?: number;
 }
@@ -66,11 +68,13 @@ export function buildImagePrompt({
   imagePrompt,
   narration = '',
   styleName = '',
+  stylePrefix,
   subIndex,
   totalSubScenes,
 }: BuildImagePromptParams): string {
-  const styleKey = styleName && STYLE_SEEDS[styleName] ? styleName : 'padrao';
-  const styleSeed = STYLE_SEEDS[styleKey];
+  const styleSeed = stylePrefix
+    ? `ESTILO MESTRE (aplique em todos os elementos): ${stylePrefix}`
+    : STYLE_SEEDS[styleName && STYLE_SEEDS[styleName] ? styleName : 'padrao'];
 
   const subPosition = (subIndex != null && totalSubScenes != null)
     ? deriveSubPosition(subIndex, totalSubScenes)

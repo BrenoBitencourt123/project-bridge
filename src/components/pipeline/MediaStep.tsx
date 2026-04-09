@@ -14,7 +14,7 @@ interface MediaStepProps {
   onNext: () => void;
   onGeneratingChange?: (generating: boolean) => void;
   geminiStyle: string;
-  onStyleChange: (style: string) => void;
+  onStyleChange: (style: string, promptPrefix?: string) => void;
 }
 
 export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNext, onGeneratingChange, geminiStyle, onStyleChange }: MediaStepProps) {
@@ -33,6 +33,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
       return (data || []).map(t => ({
         value: t.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
         label: t.name,
+        promptPrefix: t.prompt_prefix,
       }));
     },
   });
@@ -151,7 +152,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
                 variant={geminiStyle === o.value ? 'default' : 'outline'}
                 size="sm"
                 className="text-xs h-7"
-                onClick={() => onStyleChange(o.value)}
+                onClick={() => onStyleChange(o.value, o.promptPrefix)}
               >
                 {o.label}
               </Button>
