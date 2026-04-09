@@ -145,7 +145,7 @@ export function MediaStep({ project, segments, onSegmentsChange, onUpdate, onNex
         <div className="space-y-2">
           <p className="text-xs font-medium">Estilo visual das imagens</p>
           <div className="flex gap-2 flex-wrap">
-            {STYLE_OPTIONS.map(o => (
+            {styleOptions.map(o => (
               <Button
                 key={o.value}
                 variant={geminiStyle === o.value ? 'default' : 'outline'}
