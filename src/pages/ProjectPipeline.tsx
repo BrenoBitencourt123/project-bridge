@@ -69,6 +69,7 @@ export default function ProjectPipeline() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [geminiStyle, setGeminiStyle] = useState('padrao');
+  const [stylePromptPrefix, setStylePromptPrefix] = useState('');
 
   useEffect(() => {
     if (segments.length > 0 && !isGenerating) setLocalSegments(segments);
@@ -146,11 +147,11 @@ export default function ProjectPipeline() {
             onNext={() => setCurrentStep(2)}
             onGeneratingChange={setIsGenerating}
             geminiStyle={geminiStyle}
-            onStyleChange={setGeminiStyle}
+            onStyleChange={(style, prefix) => { setGeminiStyle(style); if (prefix) setStylePromptPrefix(prefix); }}
           />
         )}
         {currentStep === 2 && (
-          <ExportStep projectTitle={localProject.title} segments={localSegments} geminiStyle={geminiStyle} />
+          <ExportStep projectTitle={localProject.title} segments={localSegments} geminiStyle={geminiStyle} stylePromptPrefix={stylePromptPrefix} />
         )}
       </main>
     </div>
